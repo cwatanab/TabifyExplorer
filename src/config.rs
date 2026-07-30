@@ -124,11 +124,22 @@ pub fn load_config() {
                     ENABLE_LOG.store(true, Ordering::Relaxed);
                 } else {
                     ENABLE_LOG.store(false, Ordering::Relaxed);
+                    // ログが OFF の場合は不要なログファイルを削除
+                    if let Some(log_path) = crate::logger::get_log_path() {
+                        if log_path.exists() {
+                            let _ = fs::remove_file(log_path);
+                        }
+                    }
                 }
             }
         } else {
             // 初回起動時: unify_view_mode=true (デフォルトON), auto_start=false, enable_log=false (デフォルトOFF) で TOML 生成
             save_config();
+            if let Some(log_path) = crate::logger::get_log_path() {
+                if log_path.exists() {
+                    let _ = fs::remove_file(log_path);
+                }
+            }
         }
     }
 }

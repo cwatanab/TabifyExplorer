@@ -12,6 +12,9 @@ pub fn get_exe_dir() -> Option<std::path::PathBuf> {
 }
 
 pub fn init_logger() {
+    if !crate::config::is_log_enabled() {
+        return;
+    }
     let log_path = get_exe_dir()
         .map(|d| d.join("TabifyExplorer.log"))
         .unwrap_or_else(|| std::path::PathBuf::from("TabifyExplorer.log"));
