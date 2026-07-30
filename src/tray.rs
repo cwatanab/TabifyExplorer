@@ -66,7 +66,10 @@ pub fn add_tray_icon(hwnd: HWND) -> bool {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             hWnd: hwnd,
             uID: 1,
-            uFlags: NIF_ICON | NIF_MESSAGE | NIF_TIP,
+            uFlags: NIF_ICON
+                | NIF_MESSAGE
+                | NIF_TIP
+                | windows::Win32::UI::Shell::NOTIFY_ICON_DATA_FLAGS(0x80),
             uCallbackMessage: WM_TRAYICON,
             ..Default::default()
         };
@@ -176,7 +179,10 @@ pub fn add_tray_icon(hwnd: HWND) -> bool {
 
                 nid.Anonymous.uVersion = NOTIFYICON_VERSION_4;
                 let _ = Shell_NotifyIconW(NIM_SETVERSION, &nid);
-                nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+                nid.uFlags = NIF_ICON
+                    | NIF_MESSAGE
+                    | NIF_TIP
+                    | windows::Win32::UI::Shell::NOTIFY_ICON_DATA_FLAGS(0x80);
                 let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
                 crate::info!("トレイアイコンのツールチップ (NIM_MODIFY) 設定を適用しました。");
                 break;
@@ -277,11 +283,6 @@ pub fn handle_tray_message(hwnd: HWND, lparam: LPARAM) {
                 } else {
                     MF_UNCHECKED
                 };
-                let log_check_flag = if crate::config::is_log_enabled() {
-                    MF_CHECKED
-                } else {
-                    MF_UNCHECKED
-                };
 
                 let _ = InsertMenuW(
                     menu,
@@ -307,27 +308,6 @@ pub fn handle_tray_message(hwnd: HWND, lparam: LPARAM) {
                 let _ = InsertMenuW(
                     menu,
                     3,
-                    MF_BYPOSITION | MF_STRING | log_check_flag,
-                    ID_TRAY_ENABLE_LOG,
-                    windows::core::w!("ログ出力を有効化"),
-                );
-                let _ = InsertMenuW(
-                    menu,
-                    4,
-                    MF_BYPOSITION | MF_STRING,
-                    ID_TRAY_LOG,
-                    windows::core::w!("ログファイルを開く"),
-                );
-                let _ = InsertMenuW(
-                    menu,
-                    5,
-                    MF_BYPOSITION | MF_SEPARATOR,
-                    0,
-                    windows::core::w!(""),
-                );
-                let _ = InsertMenuW(
-                    menu,
-                    6,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_EXIT,
                     windows::core::w!("終了"),
