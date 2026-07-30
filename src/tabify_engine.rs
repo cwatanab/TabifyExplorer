@@ -116,10 +116,7 @@ impl TabifyEngine {
 
                     if !is_known && !is_processing {
                         info!("IShellWindows バックグラウンドウォッチャーで新規エクスプローラー HWND を検知: HWND {}", hwnd_val);
-                        let engine = Arc::clone(&self);
-                        std::thread::spawn(move || {
-                            engine.process_window(hwnd_val);
-                        });
+                        self.process_window(hwnd_val);
                     }
                 }
             }
@@ -182,7 +179,7 @@ impl TabifyEngine {
             }
         }
 
-        info!("[STEP 1] イベント受信: 検知ウィンドウ HWND {}", hwnd_val);
+        info!("新規エクスプローラー検知: HWND {}", hwnd_val);
 
         let known_list: Vec<HWND> = {
             let known = self.known_explorer_hwnds.lock().unwrap();
@@ -197,7 +194,7 @@ impl TabifyEngine {
             Some(target) => target,
             None => {
                 info!(
-                    "[STEP 1 終了] 統合先の既存エクスプローラーが存在しないため、ベースウィンドウとして保持します (HWND: {})",
+                    "統合先の既存エクスプローラーが存在しないため、ベースウィンドウとして保持します (HWND: {})",
                     hwnd_val
                 );
                 let mut known = self.known_explorer_hwnds.lock().unwrap();
@@ -206,13 +203,13 @@ impl TabifyEngine {
             }
         };
 
-        info!("[STEP 1 成功] 統合先親ウィンドウを確定: HWND {}", target_hwnd.0);
+        info!("統合先ウィンドウ確定: HWND {}", target_hwnd.0);
 
         // 新規ウィンドウを最優先で即時フリッカーレス非表示化 (統合先が存在する場合のみ)
         let original_rect = window_controller::hide_window(new_hwnd);
         if original_rect.is_none() {
             error!(
-                "[エラー] ウィンドウ矩形の取得または非表示化に失敗しました: HWND {}",
+                "ウィンドウ矩形の取得または非表示化に失敗しました: HWND {}",
                 hwnd_val
             );
             let mut known = self.known_explorer_hwnds.lock().unwrap();
@@ -262,32 +259,26 @@ impl TabifyEngine {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
 
-        info!("[STEP 2] 新規ウィンドウ (HWND {}) のフォルダパス解読中...", hwnd_val);
-
         // 新規ウィンドウが開こうとしている確定フォルダパスを取得
         let mut target_folder_path: Option<String> = None;
 
-        for attempt in 1..=60 {
+        for _attempt in 1..=100 {
             if let Some(p) = com_navigator::get_window_path(new_hwnd) {
                 if !p.is_empty() && path_resolver::is_navigable_folder(&p) {
+                    target_folder_path = Some(p.clone());
                     if !path_resolver::is_home_path(&p) {
-                        info!("  [パス試行 {} 回目] 確定パス検出: '{}'", attempt, p);
-                        target_folder_path = Some(p);
                         break;
-                    } else {
-                        info!("  [パス試行 {} 回目] ホーム表示パスを検出: '{}'", attempt, p);
-                        target_folder_path = Some(p);
                     }
                 }
             }
-            std::thread::sleep(Duration::from_millis(10));
+            std::thread::sleep(Duration::from_millis(1));
         }
 
         let folder_path = match target_folder_path {
             Some(p) => p,
             None => {
                 warn!(
-                    "[STEP 2 失敗] フォルダパスを取得できなかったため表示を復元します (HWND: {})",
+                    "フォルダパスを取得できなかったため表示を復元します (HWND: {})",
                     hwnd_val
                 );
                 window_controller::restore_window(new_hwnd, original_rect);
@@ -297,12 +288,11 @@ impl TabifyEngine {
             }
         };
 
-        info!("[STEP 2 成功] 目的フォルダパス確定: '{}'", folder_path);
+        info!("目的フォルダパス確定: '{}'", folder_path);
 
-        info!("[STEP 3] 統合先 (HWND {}) に Ctrl+T 送信...", target_hwnd.0);
         if let Err(e) = uia_tab_creator::create_new_tab_via_uia(target_hwnd) {
             error!(
-                "[STEP 3 失敗] Ctrl+T 送信エラー: {}. 表示復元 (HWND: {})",
+                "新規タブ作成エラー: {}. 表示復元 (HWND: {})",
                 e, hwnd_val
             );
             window_controller::restore_window(new_hwnd, original_rect);
@@ -311,16 +301,13 @@ impl TabifyEngine {
             return;
         }
 
-        info!("[STEP 3 成功] Ctrl+T 送信完了。Ctrl+9 を送信して最新の右端タブを確定選択します...");
-        std::thread::sleep(Duration::from_millis(100));
-
+        std::thread::sleep(Duration::from_millis(40));
         uia_tab_creator::activate_last_tab(target_hwnd);
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(40));
 
-        info!("[STEP 4] 新タブへアドレスバー経由で遷移送信 ('{}')...", folder_path);
         if let Err(e) = com_navigator::navigate_via_address_bar(target_hwnd, &folder_path) {
             error!(
-                "[STEP 4 失敗] アドレスバー遷移エラー: {}. 表示復元 (HWND: {})",
+                "アドレスバー遷移エラー: {}. 表示復元 (HWND: {})",
                 e, hwnd_val
             );
             window_controller::restore_window(new_hwnd, original_rect);
@@ -329,11 +316,9 @@ impl TabifyEngine {
             return;
         }
 
-        info!("[STEP 4 成功] アドレスバー遷移処理完了");
-
         info!(
-            "[STEP 5] タブ統合全行程完了。新規隠蔽ウィンドウ HWND: {} を破棄します。",
-            hwnd_val
+            "タブ統合成功: HWND {} ('{}') -> HWND {}",
+            hwnd_val, folder_path, target_hwnd.0
         );
         window_controller::close_window(new_hwnd);
 

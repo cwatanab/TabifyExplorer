@@ -161,6 +161,7 @@ fn main() {
     info!("ensure_single_instance 完了");
 
     unsafe {
+        let _ = windows::Win32::Media::timeBeginPeriod(1);
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
     }
 
@@ -172,11 +173,11 @@ fn main() {
 
     let engine_clone = Arc::clone(&engine);
     thread::spawn(move || {
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        }
         while let Ok(hwnd_val) = rx.recv() {
-            let engine = Arc::clone(&engine_clone);
-            thread::spawn(move || {
-                engine.process_window(hwnd_val);
-            });
+            engine_clone.process_window(hwnd_val);
         }
     });
 
@@ -215,5 +216,8 @@ fn main() {
         tray::remove_tray_icon(tray_hwnd);
     }
 
+    unsafe {
+        let _ = windows::Win32::Media::timeEndPeriod(1);
+    }
     info!("TabifyExplorer shutting down cleanly.");
 }

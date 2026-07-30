@@ -79,23 +79,18 @@ pub fn is_navigable_folder(path: &str) -> bool {
         return true;
     }
 
-    let lower = trimmed.to_lowercase();
-
-    // shell: で始まる仮想パス
-    if lower.starts_with("shell:") {
-        return true;
-    }
-
-    // CLSID 形式 (::{ で始まる)
-    if lower.starts_with("::{") {
+    // shell: や ::{ で始まる仮想パス
+    if trimmed.get(..6).map_or(false, |s| s.eq_ignore_ascii_case("shell:")) || trimmed.starts_with("::{") {
         return true;
     }
 
     // 「PC」「ホーム」「ギャラリー」などの CLSID / 仮想パス名
-    matches!(
-        lower.as_str(),
-        "pc" | "this pc" | "home" | "ホーム" | "gallery" | "ギャラリー"
-    )
+    trimmed.eq_ignore_ascii_case("pc")
+        || trimmed.eq_ignore_ascii_case("this pc")
+        || trimmed.eq_ignore_ascii_case("home")
+        || trimmed == "ホーム"
+        || trimmed.eq_ignore_ascii_case("gallery")
+        || trimmed == "ギャラリー"
 }
 
 /// 2つのパス文字列が同等か（/ -> \, 末尾 \ 除去, 大小文字無視）判定します。
@@ -110,15 +105,15 @@ fn normalize_path_for_equiv(path: &str) -> String {
 
 /// ホーム / デフォルト仮想フォルダかチェックします。
 pub fn is_home_path(p: &str) -> bool {
-    let lower = p.trim().to_lowercase();
-    lower == "home"
-        || lower == "ホーム"
-        || lower == "quick access"
-        || lower == "クイック アクセス"
-        || lower == "クイックアクセス"
-        || lower.contains("::{6dcd978d-6903-4905-885e-812c59d810b8}")
-        || lower.contains("::{679f85cb-0220-4080-929b-55a21749c2c1}")
-        || lower.contains("::{f874320e-b68e-4156-a30f-211113d6615b}")
+    let trimmed = p.trim();
+    trimmed.eq_ignore_ascii_case("home")
+        || trimmed == "ホーム"
+        || trimmed.eq_ignore_ascii_case("quick access")
+        || trimmed == "クイック アクセス"
+        || trimmed == "クイックアクセス"
+        || trimmed.find("::{6dcd978d-6903-4905-885e-812c59d810b8}").is_some()
+        || trimmed.find("::{679f85cb-0220-4080-929b-55a21749c2c1}").is_some()
+        || trimmed.find("::{f874320e-b68e-4156-a30f-211113d6615b}").is_some()
 }
 
 #[cfg(test)]

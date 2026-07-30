@@ -33,13 +33,14 @@ features = [
     "Win32_System_DataExchange",
     "Win32_System_Memory",
     "Win32_System_SystemServices",
+    "Win32_Media",
 ]
 
 [build-dependencies]
 winres = "0.1"
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"

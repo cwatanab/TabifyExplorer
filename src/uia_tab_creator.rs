@@ -4,7 +4,6 @@ use windows::Win32::Foundation::{BOOL, HWND};
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, SetFocus, INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, VK_CONTROL, VK_9,
-    VK_T,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, SetForegroundWindow};
 
@@ -82,12 +81,10 @@ pub fn create_new_tab_via_uia(target_hwnd: HWND) -> Result<(), String> {
         }
     }
 
-    info!(
-        "UIA ボタン探査から Ctrl+T ショートカットキー送信へフォールバックします (HWND: {})",
+    Err(format!(
+        "UIA '新しいタブ' ボタンの検出・クリックに失敗しました (HWND: {})",
         target_hwnd.0
-    );
-    send_ctrl_t(target_hwnd);
-    Ok(())
+    ))
 }
 
 pub fn release_modifier_keys() {
@@ -138,70 +135,6 @@ pub fn release_modifier_keys() {
         if !release_inputs.is_empty() {
             SendInput(&release_inputs, std::mem::size_of::<INPUT>() as i32);
             thread::sleep(Duration::from_millis(20));
-        }
-    }
-}
-
-pub fn send_ctrl_t(target_hwnd: HWND) {
-    unsafe {
-        release_modifier_keys();
-
-        let current_thread_id = GetCurrentThreadId();
-        let target_thread_id = GetWindowThreadProcessId(target_hwnd, None);
-
-        if target_thread_id != 0 && current_thread_id != target_thread_id {
-            let _ = AttachThreadInput(current_thread_id, target_thread_id, BOOL(1));
-        }
-
-        let _ = SetForegroundWindow(target_hwnd);
-        let _ = SetFocus(target_hwnd);
-        thread::sleep(Duration::from_millis(30));
-
-        let inputs = [
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_CONTROL,
-                        ..Default::default()
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_T,
-                        ..Default::default()
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_T,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        ..Default::default()
-                    },
-                },
-            },
-            INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_CONTROL,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        ..Default::default()
-                    },
-                },
-            },
-        ];
-        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
-        thread::sleep(Duration::from_millis(30));
-
-        if target_thread_id != 0 && current_thread_id != target_thread_id {
-            let _ = AttachThreadInput(current_thread_id, target_thread_id, BOOL(0));
         }
     }
 }

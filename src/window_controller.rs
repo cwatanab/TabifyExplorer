@@ -96,24 +96,10 @@ pub fn find_existing_explorer_window(_known_hwnds: &[HWND], current_hwnd: HWND) 
 
         // 自分自身、または自分と同じルートウィンドウは除外
         if hwnd == ctx.current_root || root == ctx.current_root {
-            crate::info!(
-                "  [検索スキップ] 自分自身の HWND/ルートのため除外: HWND {} (Root {})",
-                hwnd.0, root.0
-            );
             return BOOL(1);
         }
 
-        let visible = unsafe { IsWindowVisible(hwnd).as_bool() };
-        let iconic = unsafe { IsIconic(hwnd).as_bool() };
-        let is_normal = is_normal_visible_explorer_window(hwnd, None);
-
-        crate::info!(
-            "  [検索対象候補] HWND {}: Root={}, Visible={}, Iconic={}, IsNormal={}",
-            hwnd.0, root.0, visible, iconic, is_normal
-        );
-
-        if is_normal {
-            crate::info!("  [検索成功] 統合先候補として確定: HWND {}", hwnd.0);
+        if is_normal_visible_explorer_window(hwnd, None) {
             ctx.found_hwnd = Some(hwnd);
             return BOOL(0);
         }
@@ -121,11 +107,6 @@ pub fn find_existing_explorer_window(_known_hwnds: &[HWND], current_hwnd: HWND) 
     }
 
     let current_root = get_root_hwnd(current_hwnd);
-    crate::info!(
-        "[統合先探査開始] 新規 HWND: {} (Root: {})",
-        current_hwnd.0, current_root.0
-    );
-
     let mut ctx = EnumContext {
         current_root,
         found_hwnd: None,
