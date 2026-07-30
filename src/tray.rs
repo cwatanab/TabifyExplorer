@@ -7,14 +7,15 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     ChangeWindowMessageFilterEx, CreatePopupMenu, DestroyMenu, GetCursorPos, InsertMenuW,
     MessageBoxW, PostQuitMessage, SetForegroundWindow, TrackPopupMenu, CHANGEFILTERSTRUCT,
-    HICON, MB_ICONINFORMATION, MB_OK, MF_BYPOSITION, MF_STRING, MSGFLT_ALLOW, SW_SHOWNORMAL,
-    TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_RBUTTONUP,
+    HICON, MB_ICONINFORMATION, MB_OK, MF_BYPOSITION, MF_CHECKED, MF_STRING, MF_UNCHECKED,
+    MSGFLT_ALLOW, SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_RBUTTONUP,
 };
 
 pub const WM_TRAYICON: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 1;
 pub const ID_TRAY_EXIT: usize = 1001;
 pub const ID_TRAY_ABOUT: usize = 1002;
 pub const ID_TRAY_LOG: usize = 1003;
+pub const ID_TRAY_UNIFY_VIEW: usize = 1004;
 
 fn allow_tray_callback_message(hwnd: HWND) {
     unsafe {
@@ -273,23 +274,36 @@ pub fn handle_tray_message(hwnd: HWND, lparam: LPARAM) {
 
             let menu = CreatePopupMenu().unwrap_or_default();
             if !menu.is_invalid() {
+                let check_flag = if crate::config::is_unify_view_mode_enabled() {
+                    MF_CHECKED
+                } else {
+                    MF_UNCHECKED
+                };
+
                 let _ = InsertMenuW(
                     menu,
                     0,
+                    MF_BYPOSITION | MF_STRING | check_flag,
+                    ID_TRAY_UNIFY_VIEW,
+                    windows::core::w!("表示形式を親ウィンドウに統一"),
+                );
+                let _ = InsertMenuW(
+                    menu,
+                    1,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_LOG,
                     windows::core::w!("ログを表示"),
                 );
                 let _ = InsertMenuW(
                     menu,
-                    1,
+                    2,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_ABOUT,
                     windows::core::w!("バージョン情報"),
                 );
                 let _ = InsertMenuW(
                     menu,
-                    2,
+                    3,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_EXIT,
                     windows::core::w!("終了"),
@@ -318,6 +332,10 @@ pub fn handle_tray_message(hwnd: HWND, lparam: LPARAM) {
 pub fn handle_menu_command(hwnd: HWND, wparam: WPARAM) {
     let id = wparam.0 & 0xFFFF;
     match id {
+        ID_TRAY_UNIFY_VIEW => {
+            let enabled = crate::config::toggle_unify_view_mode();
+            crate::info!("表示形式統一モードを変更しました: enabled={}", enabled);
+        }
         ID_TRAY_EXIT => unsafe {
             PostQuitMessage(0);
         },

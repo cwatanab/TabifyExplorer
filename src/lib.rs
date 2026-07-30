@@ -1,4 +1,5 @@
 pub mod com_navigator;
+pub mod config;
 pub mod detector;
 pub mod logger;
 pub mod path_resolver;

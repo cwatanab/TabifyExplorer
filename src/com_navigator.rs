@@ -242,3 +242,87 @@ pub fn navigate_via_address_bar(target_hwnd: HWND, target_path: &str) -> Result<
     );
     Ok(())
 }
+
+use windows::Win32::System::Com::IServiceProvider;
+use windows::Win32::UI::Shell::{IFolderView, SID_STopLevelBrowser};
+
+pub fn get_window_view_mode(target_hwnd: HWND) -> Option<u32> {
+    if target_hwnd.0 == 0 {
+        return None;
+    }
+    unsafe {
+        let shell_windows: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_ALL).ok()?;
+        let count = shell_windows.Count().ok()?;
+
+        for i in 0..count {
+            let item = match shell_windows.Item(&VARIANT::from(i)) {
+                Ok(item) => item,
+                Err(_) => continue,
+            };
+
+            let web_browser: IWebBrowser2 = match item.cast() {
+                Ok(wb) => wb,
+                Err(_) => continue,
+            };
+
+            let hwnd_val = match web_browser.HWND() {
+                Ok(h) => h.0 as isize,
+                Err(_) => continue,
+            };
+
+            let root_hwnd = GetAncestor(HWND(hwnd_val), GA_ROOT);
+            if root_hwnd == target_hwnd || HWND(hwnd_val) == target_hwnd {
+                if let Ok(sp) = web_browser.cast::<IServiceProvider>() {
+                    if let Ok(fv) = sp.QueryService::<IFolderView>(&SID_STopLevelBrowser) {
+                        if let Ok(mode) = fv.GetCurrentViewMode() {
+                            return Some(mode);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn apply_view_mode_to_window(target_hwnd: HWND, view_mode: u32) {
+    if target_hwnd.0 == 0 {
+        return;
+    }
+    unsafe {
+        let shell_windows: IShellWindows = match CoCreateInstance(&ShellWindows, None, CLSCTX_ALL) {
+            Ok(sw) => sw,
+            Err(_) => return,
+        };
+        let count = match shell_windows.Count() {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+
+        for i in 0..count {
+            let item = match shell_windows.Item(&VARIANT::from(i)) {
+                Ok(item) => item,
+                Err(_) => continue,
+            };
+
+            let web_browser: IWebBrowser2 = match item.cast() {
+                Ok(wb) => wb,
+                Err(_) => continue,
+            };
+
+            let hwnd_val = match web_browser.HWND() {
+                Ok(h) => h.0 as isize,
+                Err(_) => continue,
+            };
+
+            let root_hwnd = GetAncestor(HWND(hwnd_val), GA_ROOT);
+            if root_hwnd == target_hwnd || HWND(hwnd_val) == target_hwnd {
+                if let Ok(sp) = web_browser.cast::<IServiceProvider>() {
+                    if let Ok(fv) = sp.QueryService::<IFolderView>(&SID_STopLevelBrowser) {
+                        let _ = fv.SetCurrentViewMode(view_mode);
+                    }
+                }
+            }
+        }
+    }
+}

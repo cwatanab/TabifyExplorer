@@ -315,6 +315,12 @@ impl TabifyEngine {
         uia_tab_creator::activate_last_tab(target_hwnd);
         std::thread::sleep(Duration::from_millis(40));
 
+        let parent_view_mode = if crate::config::is_unify_view_mode_enabled() {
+            com_navigator::get_window_view_mode(target_hwnd)
+        } else {
+            None
+        };
+
         if let Err(e) = com_navigator::navigate_via_address_bar(target_hwnd, &folder_path) {
             error!(
                 "アドレスバー遷移エラー: {}. 表示復元 (HWND: {})",
@@ -324,6 +330,11 @@ impl TabifyEngine {
             let mut known = self.known_explorer_hwnds.lock().unwrap();
             known.insert(hwnd_val);
             return;
+        }
+
+        if let Some(vm) = parent_view_mode {
+            com_navigator::apply_view_mode_to_window(target_hwnd, vm);
+            info!("親ウィンドウの表示形式 (ViewMode={}) を自動統一適用しました", vm);
         }
 
         info!(

@@ -151,6 +151,7 @@ fn main() {
     }));
 
     logger::init_logger();
+    TabifyExplorer::config::load_config();
     info!("=== TabifyExplorer アプリケーション起動 ===");
     process_info::log_current_process_security_context();
     let _mutex_handle = ensure_single_instance();
