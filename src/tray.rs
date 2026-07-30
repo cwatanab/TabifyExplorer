@@ -273,30 +273,26 @@ pub fn handle_tray_message(hwnd: HWND, lparam: LPARAM) {
 
             let menu = CreatePopupMenu().unwrap_or_default();
             if !menu.is_invalid() {
-                let log_text = "ログを表示\0".encode_utf16().collect::<Vec<u16>>();
-                let about_text = "バージョン情報\0".encode_utf16().collect::<Vec<u16>>();
-                let exit_text = "終了\0".encode_utf16().collect::<Vec<u16>>();
-
                 let _ = InsertMenuW(
                     menu,
                     0,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_LOG,
-                    PCWSTR(log_text.as_ptr()),
+                    windows::core::w!("ログを表示"),
                 );
                 let _ = InsertMenuW(
                     menu,
                     1,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_ABOUT,
-                    PCWSTR(about_text.as_ptr()),
+                    windows::core::w!("バージョン情報"),
                 );
                 let _ = InsertMenuW(
                     menu,
                     2,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_EXIT,
-                    PCWSTR(exit_text.as_ptr()),
+                    windows::core::w!("終了"),
                 );
 
                 let _ = SetForegroundWindow(hwnd);
@@ -326,13 +322,11 @@ pub fn handle_menu_command(hwnd: HWND, wparam: WPARAM) {
             PostQuitMessage(0);
         },
         ID_TRAY_ABOUT => {
-            let title = "バージョン情報\0".encode_utf16().collect::<Vec<u16>>();
-            let msg = "TabifyExplorer v0.1.0 (Rust - Optimized)\n\nWindows 11 の新規エクスプローラーを既存ウィンドウのタブへ自動統合する常駐ツールです。\0".encode_utf16().collect::<Vec<u16>>();
             unsafe {
                 MessageBoxW(
                     hwnd,
-                    PCWSTR(msg.as_ptr()),
-                    PCWSTR(title.as_ptr()),
+                    windows::core::w!("TabifyExplorer v0.1.0 (Rust - Optimized)\n\nWindows 11 の新規エクスプローラーを既存ウィンドウのタブへ自動統合する常駐ツールです。"),
+                    windows::core::w!("バージョン情報"),
                     MB_OK | MB_ICONINFORMATION,
                 );
             }
@@ -344,12 +338,11 @@ pub fn handle_menu_command(hwnd: HWND, wparam: WPARAM) {
                 }
                 let path_str = log_path.to_string_lossy().to_string() + "\0";
                 let path_u16: Vec<u16> = path_str.encode_utf16().collect();
-                let open_verb: Vec<u16> = "open\0".encode_utf16().collect();
 
                 unsafe {
                     let res = ShellExecuteW(
                         hwnd,
-                        PCWSTR(open_verb.as_ptr()),
+                        windows::core::w!("open"),
                         PCWSTR(path_u16.as_ptr()),
                         PCWSTR(std::ptr::null()),
                         PCWSTR(std::ptr::null()),

@@ -20,14 +20,10 @@ use TabifyExplorer::tabify_engine::TabifyEngine;
 use TabifyExplorer::{error, info, logger, tray, warn};
 
 fn ensure_single_instance() -> Option<HANDLE> {
-    let mutex_name: Vec<u16> = "Global\\TabifyExplorer_SingleInstance\0"
-        .encode_utf16()
-        .collect();
     unsafe {
         kill_previous_instances_fast();
         std::thread::sleep(std::time::Duration::from_millis(100));
-        let handle = CreateMutexW(None, true, PCWSTR(mutex_name.as_ptr())).ok();
-        handle
+        CreateMutexW(None, true, windows::core::w!("Global\\TabifyExplorer_SingleInstance")).ok()
     }
 }
 
@@ -96,11 +92,11 @@ fn create_tray_window() -> HWND {
     unsafe {
         let hinstance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
         let hinstance_hinstance = windows::Win32::Foundation::HINSTANCE(hinstance.0);
-        let class_name: Vec<u16> = "TabifyTrayClass\0".encode_utf16().collect();
+        let class_name = windows::core::w!("TabifyTrayClass");
         let wc = WNDCLASSW {
             lpfnWndProc: Some(tray_window_proc),
             hInstance: hinstance_hinstance,
-            lpszClassName: PCWSTR(class_name.as_ptr()),
+            lpszClassName: class_name,
             ..Default::default()
         };
         let atom = RegisterClassW(&wc);
@@ -113,8 +109,8 @@ fn create_tray_window() -> HWND {
 
         let hwnd = CreateWindowExW(
             windows::Win32::UI::WindowsAndMessaging::WINDOW_EX_STYLE(0),
-            PCWSTR(class_name.as_ptr()),
-            PCWSTR(class_name.as_ptr()),
+            class_name,
+            class_name,
             WS_OVERLAPPEDWINDOW,
             0,
             0,

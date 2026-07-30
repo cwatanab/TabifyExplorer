@@ -259,19 +259,29 @@ impl TabifyEngine {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
 
-        // 新規ウィンドウが開こうとしている確定フォルダパスを取得
+        // 新規ウィンドウが開こうとしている確定フォルダパスを取得 (1. プロセス PEB から 0ms 超即時抽出)
         let mut target_folder_path: Option<String> = None;
 
-        for _attempt in 1..=100 {
-            if let Some(p) = com_navigator::get_window_path(new_hwnd) {
-                if !p.is_empty() && path_resolver::is_navigable_folder(&p) {
-                    target_folder_path = Some(p.clone());
-                    if !path_resolver::is_home_path(&p) {
-                        break;
+        if let Some(cmd_line) = crate::process_info::get_command_line_from_hwnd(new_hwnd) {
+            if let Some(p) = crate::process_info::extract_folder_from_cmdline(&cmd_line) {
+                info!("プロセス PEB コマンドラインから 0ms 即時パス抽出に成功: '{}'", p);
+                target_folder_path = Some(p);
+            }
+        }
+
+        // 2. コマンドラインからパースできない場合は COM ポート経由で取得
+        if target_folder_path.is_none() {
+            for _attempt in 1..=100 {
+                if let Some(p) = com_navigator::get_window_path(new_hwnd) {
+                    if !p.is_empty() && path_resolver::is_navigable_folder(&p) {
+                        target_folder_path = Some(p.clone());
+                        if !path_resolver::is_home_path(&p) {
+                            break;
+                        }
                     }
                 }
+                std::thread::sleep(Duration::from_millis(1));
             }
-            std::thread::sleep(Duration::from_millis(1));
         }
 
         let folder_path = match target_folder_path {

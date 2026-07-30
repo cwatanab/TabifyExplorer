@@ -154,3 +154,179 @@ pub fn log_current_process_security_context() {
         }
     }
 }
+
+use windows::Win32::Foundation::{HWND, NTSTATUS};
+use windows::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+use windows::Win32::System::Threading::{
+    OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ,
+};
+use windows::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
+
+#[repr(C)]
+struct PROCESS_BASIC_INFORMATION {
+    _exit_status: NTSTATUS,
+    peb_base_address: *mut std::ffi::c_void,
+    _affinity_mask: usize,
+    _base_priority: i32,
+    _unique_process_id: usize,
+    _inherited_from_unique_process_id: usize,
+}
+
+#[repr(C)]
+struct UNICODE_STRING {
+    length: u16,
+    maximum_length: u16,
+    buffer: *mut u16,
+}
+
+#[repr(C)]
+struct RTL_USER_PROCESS_PARAMETERS {
+    _reserved1: [u8; 16],
+    _reserved2: [*mut std::ffi::c_void; 5],
+    _current_directory_path: [u8; 24],
+    _dll_path: UNICODE_STRING,
+    _image_path_name: UNICODE_STRING,
+    command_line: UNICODE_STRING,
+}
+
+pub fn get_command_line_from_hwnd(hwnd: HWND) -> Option<String> {
+    if hwnd.0 == 0 {
+        return None;
+    }
+    unsafe {
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+        if pid == 0 {
+            return None;
+        }
+
+        let process_handle =
+            OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid).ok()?;
+        let res = extract_cmdline_from_process(process_handle);
+        let _ = CloseHandle(process_handle);
+        res
+    }
+}
+
+unsafe fn extract_cmdline_from_process(process: HANDLE) -> Option<String> {
+    type FnNtQueryInformationProcess = unsafe extern "system" fn(
+        HANDLE,
+        u32,
+        *mut std::ffi::c_void,
+        u32,
+        *mut u32,
+    ) -> NTSTATUS;
+
+    let ntdll = windows::Win32::System::LibraryLoader::GetModuleHandleW(windows::core::w!(
+        "ntdll.dll"
+    ))
+    .ok()?;
+    let proc_addr = windows::Win32::System::LibraryLoader::GetProcAddress(
+        ntdll,
+        windows::core::s!("NtQueryInformationProcess"),
+    )?;
+    let nt_query: FnNtQueryInformationProcess = std::mem::transmute(proc_addr);
+
+    let mut pbi = std::mem::zeroed::<PROCESS_BASIC_INFORMATION>();
+    let mut return_length = 0u32;
+    let status = nt_query(
+        process,
+        0,
+        &mut pbi as *mut _ as _,
+        std::mem::size_of::<PROCESS_BASIC_INFORMATION>() as u32,
+        &mut return_length,
+    );
+    if status.0 != 0 || pbi.peb_base_address.is_null() {
+        return None;
+    }
+
+    let process_parameters_ptr_addr =
+        (pbi.peb_base_address as usize + 0x20) as *const std::ffi::c_void;
+    let mut process_parameters_ptr = std::ptr::null_mut::<std::ffi::c_void>();
+    let mut bytes_read = 0usize;
+
+    if ReadProcessMemory(
+        process,
+        process_parameters_ptr_addr,
+        &mut process_parameters_ptr as *mut _ as _,
+        std::mem::size_of::<*mut std::ffi::c_void>(),
+        Some(&mut bytes_read),
+    )
+    .is_err()
+        || process_parameters_ptr.is_null()
+    {
+        return None;
+    }
+
+    let mut params = std::mem::zeroed::<RTL_USER_PROCESS_PARAMETERS>();
+    if ReadProcessMemory(
+        process,
+        process_parameters_ptr,
+        &mut params as *mut _ as _,
+        std::mem::size_of::<RTL_USER_PROCESS_PARAMETERS>(),
+        Some(&mut bytes_read),
+    )
+    .is_err()
+    {
+        return None;
+    }
+
+    if params.command_line.buffer.is_null() || params.command_line.length == 0 {
+        return None;
+    }
+
+    let len_chars = (params.command_line.length / 2) as usize;
+    let mut buffer = vec![0u16; len_chars];
+
+    if ReadProcessMemory(
+        process,
+        params.command_line.buffer as _,
+        buffer.as_mut_ptr() as _,
+        params.command_line.length as usize,
+        Some(&mut bytes_read),
+    )
+    .is_err()
+    {
+        return None;
+    }
+
+    Some(String::from_utf16_lossy(&buffer))
+}
+
+pub fn extract_folder_from_cmdline(cmd_line: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    let mut in_quotes = false;
+    let mut current = String::new();
+
+    for c in cmd_line.chars() {
+        if c == '"' {
+            in_quotes = !in_quotes;
+            if !current.is_empty() {
+                parts.push(current.clone());
+                current.clear();
+            }
+        } else if c == ' ' && !in_quotes {
+            if !current.is_empty() {
+                parts.push(current.clone());
+                current.clear();
+            }
+        } else {
+            current.push(c);
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+
+    for part in parts {
+        let trimmed = part.trim_matches('"').trim();
+        if !trimmed.is_empty()
+            && crate::path_resolver::is_navigable_folder(trimmed)
+            && !crate::path_resolver::is_home_path(trimmed)
+        {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    None
+}
