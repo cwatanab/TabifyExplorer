@@ -29,6 +29,9 @@ pub fn get_log_path() -> Option<std::path::PathBuf> {
 }
 
 pub fn log_msg(level: &str, msg: &str) {
+    if !crate::config::is_log_enabled() {
+        return;
+    }
     if let Ok(mut guard) = LOGGER.lock() {
         if let Some(f) = guard.as_mut() {
             let now = std::time::SystemTime::now()

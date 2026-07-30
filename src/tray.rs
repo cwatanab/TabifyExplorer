@@ -16,6 +16,8 @@ pub const ID_TRAY_EXIT: usize = 1001;
 pub const ID_TRAY_ABOUT: usize = 1002;
 pub const ID_TRAY_LOG: usize = 1003;
 pub const ID_TRAY_UNIFY_VIEW: usize = 1004;
+pub const ID_TRAY_AUTO_START: usize = 1005;
+pub const ID_TRAY_ENABLE_LOG: usize = 1006;
 
 fn allow_tray_callback_message(hwnd: HWND) {
     unsafe {
@@ -274,7 +276,17 @@ pub fn handle_tray_message(hwnd: HWND, lparam: LPARAM) {
 
             let menu = CreatePopupMenu().unwrap_or_default();
             if !menu.is_invalid() {
-                let check_flag = if crate::config::is_unify_view_mode_enabled() {
+                let unify_check_flag = if crate::config::is_unify_view_mode_enabled() {
+                    MF_CHECKED
+                } else {
+                    MF_UNCHECKED
+                };
+                let auto_start_check_flag = if crate::config::is_auto_start_enabled() {
+                    MF_CHECKED
+                } else {
+                    MF_UNCHECKED
+                };
+                let log_check_flag = if crate::config::is_log_enabled() {
                     MF_CHECKED
                 } else {
                     MF_UNCHECKED
@@ -283,27 +295,41 @@ pub fn handle_tray_message(hwnd: HWND, lparam: LPARAM) {
                 let _ = InsertMenuW(
                     menu,
                     0,
-                    MF_BYPOSITION | MF_STRING | check_flag,
+                    MF_BYPOSITION | MF_STRING | unify_check_flag,
                     ID_TRAY_UNIFY_VIEW,
                     windows::core::w!("表示形式を親ウィンドウに統一"),
                 );
                 let _ = InsertMenuW(
                     menu,
                     1,
+                    MF_BYPOSITION | MF_STRING | auto_start_check_flag,
+                    ID_TRAY_AUTO_START,
+                    windows::core::w!("Windows 起動時に自動起動"),
+                );
+                let _ = InsertMenuW(
+                    menu,
+                    2,
+                    MF_BYPOSITION | MF_STRING | log_check_flag,
+                    ID_TRAY_ENABLE_LOG,
+                    windows::core::w!("ログ出力を有効化"),
+                );
+                let _ = InsertMenuW(
+                    menu,
+                    3,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_LOG,
                     windows::core::w!("ログを表示"),
                 );
                 let _ = InsertMenuW(
                     menu,
-                    2,
+                    4,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_ABOUT,
                     windows::core::w!("バージョン情報"),
                 );
                 let _ = InsertMenuW(
                     menu,
-                    3,
+                    5,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_EXIT,
                     windows::core::w!("終了"),
@@ -335,6 +361,14 @@ pub fn handle_menu_command(hwnd: HWND, wparam: WPARAM) {
         ID_TRAY_UNIFY_VIEW => {
             let enabled = crate::config::toggle_unify_view_mode();
             crate::info!("表示形式統一モードを変更しました: enabled={}", enabled);
+        }
+        ID_TRAY_AUTO_START => {
+            let enabled = crate::config::toggle_auto_start();
+            crate::info!("Windows 自動起動モードを変更しました: enabled={}", enabled);
+        }
+        ID_TRAY_ENABLE_LOG => {
+            let enabled = crate::config::toggle_log_enabled();
+            crate::info!("ログ出力モードを変更しました: enabled={}", enabled);
         }
         ID_TRAY_EXIT => unsafe {
             PostQuitMessage(0);
