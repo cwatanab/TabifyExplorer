@@ -7,8 +7,8 @@ use windows::Win32::UI::Shell::{
 use windows::Win32::UI::WindowsAndMessaging::{
     ChangeWindowMessageFilterEx, CreatePopupMenu, DestroyMenu, GetCursorPos, InsertMenuW,
     MessageBoxW, PostQuitMessage, SetForegroundWindow, TrackPopupMenu, CHANGEFILTERSTRUCT,
-    HICON, MB_ICONINFORMATION, MB_OK, MF_BYPOSITION, MF_CHECKED, MF_STRING, MF_UNCHECKED,
-    MSGFLT_ALLOW, SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_RBUTTONUP,
+    HICON, MB_ICONINFORMATION, MB_OK, MF_BYPOSITION, MF_CHECKED, MF_SEPARATOR, MF_STRING,
+    MF_UNCHECKED, MSGFLT_ALLOW, SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_RBUTTONUP,
 };
 
 pub const WM_TRAYICON: u32 = windows::Win32::UI::WindowsAndMessaging::WM_USER + 1;
@@ -309,27 +309,48 @@ pub fn handle_tray_message(hwnd: HWND, lparam: LPARAM) {
                 let _ = InsertMenuW(
                     menu,
                     2,
+                    MF_BYPOSITION | MF_SEPARATOR,
+                    0,
+                    windows::core::w!(""),
+                );
+                let _ = InsertMenuW(
+                    menu,
+                    3,
                     MF_BYPOSITION | MF_STRING | log_check_flag,
                     ID_TRAY_ENABLE_LOG,
                     windows::core::w!("ログ出力を有効化"),
                 );
                 let _ = InsertMenuW(
                     menu,
-                    3,
+                    4,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_LOG,
-                    windows::core::w!("ログを表示"),
+                    windows::core::w!("ログファイルを開く"),
                 );
                 let _ = InsertMenuW(
                     menu,
-                    4,
+                    5,
+                    MF_BYPOSITION | MF_SEPARATOR,
+                    0,
+                    windows::core::w!(""),
+                );
+                let _ = InsertMenuW(
+                    menu,
+                    6,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_ABOUT,
                     windows::core::w!("バージョン情報"),
                 );
                 let _ = InsertMenuW(
                     menu,
-                    5,
+                    7,
+                    MF_BYPOSITION | MF_SEPARATOR,
+                    0,
+                    windows::core::w!(""),
+                );
+                let _ = InsertMenuW(
+                    menu,
+                    8,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_EXIT,
                     windows::core::w!("終了"),
