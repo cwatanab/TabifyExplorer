@@ -2,7 +2,7 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, HWND, LPARAM, WPARAM};
 use windows::Win32::UI::Shell::{
     ShellExecuteW, Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE,
-    NIM_SETVERSION, NOTIFYICON_VERSION_4, NOTIFYICONDATAW,
+    NIM_MODIFY, NIM_SETVERSION, NOTIFYICON_VERSION_4, NOTIFYICONDATAW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     ChangeWindowMessageFilterEx, CreatePopupMenu, DestroyMenu, GetCursorPos, InsertMenuW,
@@ -175,19 +175,10 @@ pub fn add_tray_icon(hwnd: HWND) -> bool {
                 }
 
                 nid.Anonymous.uVersion = NOTIFYICON_VERSION_4;
-                if Shell_NotifyIconW(NIM_SETVERSION, &nid).as_bool() {
-                    crate::info!(
-                        "トレイアイコンのバージョン設定 (NIM_SETVERSION / NOTIFYICON_VERSION_4) に成功しました。(hwnd={:?})",
-                        hwnd
-                    );
-                } else {
-                    let err = windows::Win32::Foundation::GetLastError();
-                    crate::warn!(
-                        "トレイアイコンのバージョン設定 (NIM_SETVERSION) に失敗しました。(hwnd={:?}, GetLastError={:?})",
-                        hwnd,
-                        err
-                    );
-                }
+                let _ = Shell_NotifyIconW(NIM_SETVERSION, &nid);
+                nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+                let _ = Shell_NotifyIconW(NIM_MODIFY, &nid);
+                crate::info!("トレイアイコンのツールチップ (NIM_MODIFY) 設定を適用しました。");
                 break;
             } else {
                 let err = windows::Win32::Foundation::GetLastError();
