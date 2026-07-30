@@ -149,7 +149,7 @@ pub fn add_tray_icon(hwnd: HWND) -> bool {
 
         nid.hIcon = hicon;
 
-        let tip = "TabifyExplorer\0".encode_utf16().collect::<Vec<u16>>();
+        let tip = "TabifyExplorer v0.3.2\0".encode_utf16().collect::<Vec<u16>>();
         for (i, &c) in tip.iter().enumerate().take(127) {
             nid.szTip[i] = c;
         }
@@ -337,20 +337,6 @@ pub fn handle_tray_message(hwnd: HWND, lparam: LPARAM) {
                 let _ = InsertMenuW(
                     menu,
                     6,
-                    MF_BYPOSITION | MF_STRING,
-                    ID_TRAY_ABOUT,
-                    windows::core::w!("バージョン情報"),
-                );
-                let _ = InsertMenuW(
-                    menu,
-                    7,
-                    MF_BYPOSITION | MF_SEPARATOR,
-                    0,
-                    windows::core::w!(""),
-                );
-                let _ = InsertMenuW(
-                    menu,
-                    8,
                     MF_BYPOSITION | MF_STRING,
                     ID_TRAY_EXIT,
                     windows::core::w!("終了"),
