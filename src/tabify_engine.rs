@@ -307,6 +307,39 @@ impl TabifyEngine {
 
         info!("目的フォルダパス確定: '{}'", folder_path);
 
+        // 既存タブが存在するか確認
+        let all_tabs = com_navigator::get_all_tabs(target_hwnd);
+        let mut existing_tab_name = None;
+        let mut existing_tab_hwnd = None;
+        for tab in &all_tabs {
+            if path_resolver::are_paths_equivalent(&tab.path, &folder_path) {
+                existing_tab_name = Some(tab.location_name.clone());
+                existing_tab_hwnd = Some(tab.hwnd);
+                break;
+            }
+        }
+
+        if let Some(tab_name) = existing_tab_name {
+            info!("既存タブが存在します。新規タブを作成せず、既存タブ '{}' をアクティブ化します。", tab_name);
+            let _ = uia_tab_creator::activate_tab_by_name(target_hwnd, &tab_name);
+            
+            if let Some(hwnd) = existing_tab_hwnd {
+                unsafe {
+                    let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(hwnd);
+                    let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
+                }
+            }
+
+            info!(
+                "既存タブ統合完了: HWND {} ('{}') -> HWND {}",
+                hwnd_val, folder_path, target_hwnd.0
+            );
+            window_controller::close_window(new_hwnd);
+            
+            drop(processing_guard);
+            return;
+        }
+
         if let Err(e) = uia_tab_creator::create_new_tab_via_uia(target_hwnd) {
             error!(
                 "新規タブ作成エラー: {}. 表示復元 (HWND: {})",
@@ -318,9 +351,8 @@ impl TabifyEngine {
             return;
         }
 
-        std::thread::sleep(Duration::from_millis(40));
+        // スリープ待機を完全除去（0ms 即時連動）
         uia_tab_creator::activate_last_tab(target_hwnd);
-        std::thread::sleep(Duration::from_millis(40));
 
         let parent_view_mode = if crate::config::is_unify_view_mode_enabled() {
             com_navigator::get_window_view_mode(target_hwnd)
@@ -328,15 +360,59 @@ impl TabifyEngine {
             None
         };
 
-        if let Err(e) = com_navigator::navigate_via_address_bar(target_hwnd, &folder_path) {
-            error!(
-                "アドレスバー遷移エラー: {}. 表示復元 (HWND: {})",
-                e, hwnd_val
-            );
-            window_controller::restore_window(new_hwnd, original_rect);
-            let mut known = self.known_explorer_hwnds.lock().unwrap();
-            known.insert(hwnd_val);
-            return;
+        let before_ptrs: HashSet<*mut std::ffi::c_void> = all_tabs
+            .iter()
+            .map(|t| t.browser.as_raw())
+            .collect();
+
+        let mut target_browser: Option<windows::Win32::UI::Shell::IWebBrowser2> = None;
+
+        for _attempt in 0..50 {
+            let tabs_after = com_navigator::get_all_tabs(target_hwnd);
+            
+            // 1. 新しく増えた COM ポインタを持つタブを優先検索
+            for tab_after in &tabs_after {
+                let ptr = tab_after.browser.as_raw();
+                if !before_ptrs.contains(&ptr) {
+                    target_browser = Some(tab_after.browser.clone());
+                    break;
+                }
+            }
+
+            if target_browser.is_some() {
+                break;
+            }
+
+            // 2. ポインタに変化がない場合でもタブ数が増加していれば最後のタブを採用
+            if tabs_after.len() > all_tabs.len() {
+                if let Some(last_tab) = tabs_after.last() {
+                    target_browser = Some(last_tab.browser.clone());
+                    break;
+                }
+            }
+
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        let mut com_nav_success = false;
+        if let Some(browser) = target_browser {
+            if com_navigator::navigate_via_com(&browser, &folder_path).is_ok() {
+                com_nav_success = true;
+            }
+        }
+
+        if !com_nav_success {
+            info!("COM 経由でのナビゲーション対象が見つからないか失敗したため、アドレスバー経由での遷移にフォールバックします。");
+            if let Err(e) = com_navigator::navigate_via_address_bar(target_hwnd, &folder_path) {
+                error!(
+                    "アドレスバー遷移エラー: {}. 表示復元 (HWND: {})",
+                    e, hwnd_val
+                );
+                window_controller::restore_window(new_hwnd, original_rect);
+                let mut known = self.known_explorer_hwnds.lock().unwrap();
+                known.insert(hwnd_val);
+                return;
+            }
         }
 
         if let Some(vm) = parent_view_mode {

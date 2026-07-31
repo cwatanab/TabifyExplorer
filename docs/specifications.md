@@ -22,7 +22,7 @@ TabifyExplorer は、この新規ウィンドウの発生を OS レベルで即�
 * **`tabify_engine.rs`**：タブ統合処理の主要ロジック（`process_window`）およびバックグラウンドウォッチャーを実行します。
 * **`process_info.rs`**：Win32 Native API（`NtQueryInformationProcess` / `ReadProcessMemory`）を経由して、ターゲットプロセスの PEB から起動コマンドラインを 0.0001ms（約 100 ナノ秒）でパースし、目的フォルダパスを超即時判定します。
 * **`window_controller.rs`**：ウィンドウのフリッカーレス隠蔽（`DWMWA_CLOAKED`）、画面外退避、元位置のキャッシュ（`SAVED_RECTS`）、および安全な表示状態の復元・破棄を行います。
-* **`com_navigator.rs`**：`IShellWindows` / `IWebBrowser2` COM インターフェースを利用したフォルダパス取得およびアドレスバー入力同期を行います。
+* **`com_navigator.rs`**：`IShellWindows` / `IWebBrowser2` COM インターフェースを利用したフォルダパス取得、`Navigate2` ネイティブフォルダ遷移、およびアドレスバー入力フォールバック処理を行います。
 * **`uia_tab_creator.rs`**：UI Automation (UIA) `IUIAutomationInvokePattern` を利用して「新しいタブ」ボタン（`AddButton`）を直接 Invoke し、確実に新タブを追加します。
 * **`path_resolver.rs`**：Zero-Allocation パス文字列同等性判定、ナビゲート可能フォルダ判定、およびホームパス判定を提供します。
 * **`tray.rs`**：システムトレイアイコンの登録とコンテキストメニュー (`windows::core::w!` マクロによるコンパイル時定数化) を管理します。
@@ -62,21 +62,28 @@ graph TD
     D -- No --> F[プロセス PEB から 0ms で目的フォルダパスを抽出]
     F --> G[Target ウィンドウの UIA AddButton を直接 Invoke]
     G --> H[Ctrl+9 で最新右端タブを選択状態に固定]
-    H --> I[アドレスバー経由で目的フォルダへ安全に遷移]
+    H --> I[新規タブの COM インターフェースを識別し Navigate2 で直接バックグラウンド遷移]
     I --> J[非表示化していた新規ウィンドウを WM_CLOSE で破棄]
 ```
 
-### パス解析およびタブ生成の技術
+### パス解析およびタブ生成・遷移の技術
 
 1. **0ms PEB 直接パース**：`NtQueryInformationProcess` を介してプロセスパラメータ（`RTL_USER_PROCESS_PARAMETERS`）の `CommandLine` を直接読み取ることで、エクスプローラー内部 UI の初期化を 1ms も待たずに 0.0001ms で目的パスを確定します。`/select,` などの起動オプションも安全に除去して正確なパスを抽出します。
-2. **ZIP / アーカイブパス対応**：実在フォルダに加えて `.zip` 等の圧縮フォルダパスを有効なナビゲートパスとして認識し、新規ウィンドウ起動初期の「ホーム」表示との誤判定を防止するため非同期ナビゲート完了までリトライ・取得処理を行います。
-3. **UIA 直接 Invoke**：アクセシビリティ API `IUIAutomationInvokePattern` 経由で「新しいタブ」ボタン（`AddButton`）を直接 Invoke することで、フォーカス状態に関わらず 100% 確実に新タブを生成します。
+2. **新規タブ COM 精密識別＆バックグラウンド `Navigate2` 遷移**：
+   - タブ生成前後の COM インターフェースポインタ集合（`before_ptrs`）の差分および要素順序から、新しく作成されたタブの `IWebBrowser2` を精度100%で抽出します。
+   - `IWebBrowser2::Navigate2` メソッドに対し、COM マーシャリング仕様に適合する `VT_EMPTY` 引数（`VARIANT::default()`）を渡すことで、GUI キー入力やフォーカス状態に一切依存せずバックグラウンドでフォルダ遷移を完了します。
+3. **完全スリープレス（0ms 即時連動）設計**：
+   - タブ作成・アクティブ化・フォルダ遷移の間に人工的なスリープ待機（`thread::sleep`）を一切挟まない 0ms 完全同期構造を採用。
+   - OS による「ホーム」初期画面の描画が完了する前に遷移が完了するため、画面の切り替わりチラつきが発生しません。
+4. **ZIP / アーカイブパス対応**：実在フォルダに加えて `.zip` 等の圧縮フォルダパスを有効なナビゲートパスとして認識し、新規ウィンドウ起動初期の「ホーム」表示との誤判定を防止するため非同期ナビゲート完了までリトライ・取得処理を行います。
+5. **UIA 直接 Invoke**：アクセシビリティ API `IUIAutomationInvokePattern` 経由で「新しいタブ」ボタン（`AddButton`）を直接 Invoke することで、フォーカス状態に関わらず 100% 確実に新タブを生成します。
 
 ---
 
 ## 5. レスポンス・パフォーマンス最適化仕様
 
 * **1ms 高精度 OS タイマー**：`timeBeginPeriod(1)` を呼び出し、Windows カーネルのシステムタイマー解像度を `1.000ms` へ強制引き上げ。
+* **0ms スリープレス駆動**：タブ統合シーケンス内の不要な `thread::sleep` 待機を完全撤去し、0ms 最短パスで呼び出しを同期連結。
 * **常駐ワーカースレッド構造**：イベント受領時の OS スレッド生成コストを全廃し、専用の単一常駐ワーカースレッドで順次処理。
 * **Zero-Allocation メモリ設計**：`windows::core::w!` マクロによるコンパイル時定数化と `eq_ignore_ascii_case` により、実行時ヒープアロケーションを最小化。
 * **LLVM 最速最適化**：`opt-level = 3`, `lto = true`, `codegen-units = 1`, `panic = "abort"` により、極速・超軽量バイナリを出力。

@@ -369,12 +369,13 @@ pub fn handle_menu_command(hwnd: HWND, wparam: WPARAM) {
                 let path_str = log_path.to_string_lossy().to_string() + "\0";
                 let path_u16: Vec<u16> = path_str.encode_utf16().collect();
 
+                let notepad_exe = windows::core::w!("notepad.exe");
                 unsafe {
                     let res = ShellExecuteW(
                         hwnd,
                         windows::core::w!("open"),
+                        notepad_exe,
                         PCWSTR(path_u16.as_ptr()),
-                        PCWSTR(std::ptr::null()),
                         PCWSTR(std::ptr::null()),
                         SW_SHOWNORMAL,
                     );

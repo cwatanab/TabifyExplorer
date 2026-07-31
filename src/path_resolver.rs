@@ -69,6 +69,14 @@ pub fn is_navigable_folder(path: &str) -> bool {
         return false;
     }
 
+    let lower_trimmed = trimmed.to_lowercase();
+    if lower_trimmed.starts_with("http://")
+        || lower_trimmed.starts_with("https://")
+        || lower_trimmed.starts_with("ftp://")
+    {
+        return false;
+    }
+
     // UNC パス (\ や // で始まる)
     if trimmed.starts_with("\\\\") || trimmed.starts_with("//") {
         return true;

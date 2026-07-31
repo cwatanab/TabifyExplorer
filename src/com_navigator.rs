@@ -19,6 +19,13 @@ use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
 use crate::info;
 use crate::path_resolver::parse_location_url;
 
+pub struct TabInfo {
+    pub path: String,
+    pub location_name: String,
+    pub browser: IWebBrowser2,
+    pub hwnd: HWND,
+}
+
 /// 指定 HWND の最上位ルートウィンドウ HWND を取得します。
 pub fn get_root_hwnd(hwnd: HWND) -> HWND {
     if hwnd.0 == 0 {
@@ -30,6 +37,62 @@ pub fn get_root_hwnd(hwnd: HWND) -> HWND {
     } else {
         root
     }
+}
+
+/// 指定したエクスプローラーウィンドウ (target_hwnd) の IWebBrowser2 インスタンスを取得します。
+pub fn get_target_browser(target_hwnd: HWND) -> Option<IWebBrowser2> {
+    if target_hwnd.0 == 0 {
+        return None;
+    }
+    let target_root = get_root_hwnd(target_hwnd);
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let shell_windows: IShellWindows = match CoCreateInstance(&ShellWindows, None, CLSCTX_ALL) {
+            Ok(sw) => sw,
+            Err(e) => {
+                crate::warn!("CoCreateInstance(ShellWindows) 失敗: {}", e);
+                return None;
+            }
+        };
+        let count = shell_windows.Count().ok().unwrap_or(0);
+
+        for i in 0..count {
+            let var = VARIANT::from(i);
+            let dispatch = match shell_windows.Item(&var) {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+
+            let browser: IWebBrowser2 = match dispatch.cast() {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+
+            let hwnd_val = match browser.HWND() {
+                Ok(h) => h,
+                Err(_) => continue,
+            };
+
+            let browser_root = get_root_hwnd(HWND(hwnd_val.0));
+
+            if hwnd_val.0 as isize == target_hwnd.0
+                || browser_root.0 as isize == target_root.0
+                || browser_root.0 as isize == target_hwnd.0
+                || hwnd_val.0 as isize == target_root.0
+            {
+                return Some(browser);
+            }
+        }
+        crate::warn!(
+            "target_hwnd ({}) または target_root ({}) に一致する ShellWindow が見つかりませんでした (Count={})",
+            target_hwnd.0,
+            target_root.0,
+            count
+        );
+    }
+
+    None
 }
 
 /// 指定したエクスプローラーウィンドウ (target_hwnd) の現在のフォルダパスを COM 経由で取得します。
@@ -101,6 +164,116 @@ pub fn get_window_path(target_hwnd: HWND) -> Option<String> {
     }
 
     None
+}
+
+/// 指定したエクスプローラーウィンドウ (target_hwnd) のすべてのタブを取得します。
+pub fn get_all_tabs(target_hwnd: HWND) -> Vec<TabInfo> {
+    let mut tabs = Vec::new();
+    if target_hwnd.0 == 0 {
+        return tabs;
+    }
+    let target_root = get_root_hwnd(target_hwnd);
+
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        if let Ok(shell_windows) = CoCreateInstance::<_, IShellWindows>(&ShellWindows, None, CLSCTX_ALL) {
+            if let Ok(count) = shell_windows.Count() {
+                for i in 0..count {
+                    let var = VARIANT::from(i);
+                    let dispatch = match shell_windows.Item(&var) {
+                        Ok(d) => d,
+                        Err(_) => continue,
+                    };
+
+                    let browser: IWebBrowser2 = match dispatch.cast() {
+                        Ok(b) => b,
+                        Err(_) => continue,
+                    };
+
+                    let hwnd_val = match browser.HWND() {
+                        Ok(h) => HWND(h.0 as isize),
+                        Err(_) => continue,
+                    };
+
+                    let browser_root = get_root_hwnd(hwnd_val);
+
+                    if hwnd_val.0 as isize == target_hwnd.0
+                        || browser_root.0 as isize == target_root.0
+                        || browser_root.0 as isize == target_hwnd.0
+                        || hwnd_val.0 as isize == target_root.0
+                    {
+                        let mut path_str = String::new();
+                        
+                        if let Ok(doc_dispatch) = browser.Document() {
+                            if let Ok(folder_view) = doc_dispatch.cast::<IShellFolderViewDual>() {
+                                if let Ok(folder) = folder_view.Folder() {
+                                    if let Ok(folder2) = folder.cast::<Folder2>() {
+                                        if let Ok(folder_item) = folder2.Self_() {
+                                            if let Ok(bstr_path) = folder_item.Path() {
+                                                let p = bstr_path.to_string();
+                                                if !p.is_empty() {
+                                                    path_str = p;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if path_str.is_empty() {
+                            let location_url = browser.LocationURL().ok().unwrap_or_default();
+                            let loc_str = location_url.to_string();
+                            if !loc_str.is_empty() {
+                                if let Some(parsed) = parse_location_url(&loc_str) {
+                                    path_str = parsed;
+                                }
+                            }
+                        }
+
+                        let location_name = browser.LocationName().ok().unwrap_or_default().to_string();
+
+                        if !path_str.is_empty() {
+                            tabs.push(TabInfo {
+                                path: path_str,
+                                location_name,
+                                browser: browser.clone(),
+                                hwnd: hwnd_val,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    tabs
+}
+
+/// COM を使用してエクスプローラーをフォルダへ遷移させます。
+pub fn navigate_via_com(browser: &IWebBrowser2, target_path: &str) -> Result<(), String> {
+    use windows::core::BSTR;
+    
+    let path_bstr = BSTR::from(target_path);
+    let url = VARIANT::from(path_bstr);
+    let empty = VARIANT::default();
+    
+    unsafe {
+        if let Err(e) = browser.Navigate2(
+            &url as *const _,
+            Some(&empty as *const _),
+            Some(&empty as *const _),
+            Some(&empty as *const _),
+            Some(&empty as *const _),
+        ) {
+            crate::warn!("browser.Navigate2 呼び出しに失敗しました: {} (パス: '{}')", e, target_path);
+            return Err(format!("Navigate2 failed: {}", e));
+        }
+    }
+    crate::info!(
+        "COM 経由でのフォルダ遷移を完了しました: '{}'",
+        target_path
+    );
+    Ok(())
 }
 
 /// アドレスバー操作 (Alt+D -> Unicode パス送信 -> Enter) で指定 HWND のエクスプローラーをフォルダへ遷移させます。

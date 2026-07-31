@@ -14,8 +14,8 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
 };
 use windows::Win32::UI::Accessibility::{
-    CUIAutomation, IUIAutomation, IUIAutomationInvokePattern, TreeScope_Subtree,
-    UIA_AutomationIdPropertyId, UIA_InvokePatternId, UIA_NamePropertyId,
+    CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationInvokePattern, IUIAutomationSelectionItemPattern, TreeScope_Subtree,
+    UIA_AutomationIdPropertyId, UIA_InvokePatternId, UIA_NamePropertyId, UIA_SelectionItemPatternId, UIA_ControlTypePropertyId, UIA_TabItemControlTypeId
 };
 
 /// 指定したエクスプローラーウィンドウ (target_hwnd) に UIA / Ctrl+T でタブを追加します。
@@ -87,49 +87,91 @@ pub fn create_new_tab_via_uia(target_hwnd: HWND) -> Result<(), String> {
     ))
 }
 
+/// 指定したエクスプローラーウィンドウ内のすべてのタブ要素 (UIA) を取得します。
+pub fn get_uia_tab_items(target_hwnd: HWND) -> Vec<IUIAutomationElement> {
+    let mut items = Vec::new();
+    unsafe {
+        if let Ok(automation) = CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER) {
+            if let Ok(root) = automation.ElementFromHandle(target_hwnd) {
+                let var_type = VARIANT::from(UIA_TabItemControlTypeId.0 as i32);
+                if let Ok(cond) = automation.CreatePropertyCondition(UIA_ControlTypePropertyId, &var_type) {
+                    if let Ok(array) = root.FindAll(TreeScope_Subtree, &cond) {
+                        if let Ok(len) = array.Length() {
+                            for i in 0..len {
+                                if let Ok(elem) = array.GetElement(i) {
+                                    items.push(elem);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    items
+}
+
+/// 指定した名前のタブを UIA 経由でアクティブ化します。
+pub fn activate_tab_by_name(target_hwnd: HWND, tab_name: &str) -> Result<(), String> {
+    let items = get_uia_tab_items(target_hwnd);
+    for elem in items {
+        unsafe {
+            if let Ok(name_bstr) = elem.CurrentName() {
+                let name = name_bstr.to_string();
+                if name == tab_name {
+                    // Try SelectionItemPattern first
+                    if let Ok(pattern_unk) = elem.GetCurrentPattern(UIA_SelectionItemPatternId) {
+                        if let Ok(sel_pattern) = pattern_unk.cast::<IUIAutomationSelectionItemPattern>() {
+                            if sel_pattern.Select().is_ok() {
+                                info!("UIA SelectionItemPattern 経由でタブ '{}' をアクティブ化しました (HWND: {})", tab_name, target_hwnd.0);
+                                return Ok(());
+                            }
+                        }
+                    }
+                    // Fallback to InvokePattern
+                    if let Ok(pattern_unk) = elem.GetCurrentPattern(UIA_InvokePatternId) {
+                        if let Ok(inv_pattern) = pattern_unk.cast::<IUIAutomationInvokePattern>() {
+                            if inv_pattern.Invoke().is_ok() {
+                                info!("UIA InvokePattern 経由でタブ '{}' をアクティブ化しました (HWND: {})", tab_name, target_hwnd.0);
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Err(format!("UIA でタブ '{}' が見つからなかったか、アクティブ化に失敗しました (HWND: {})", tab_name, target_hwnd.0))
+}
+
 pub fn release_modifier_keys() {
     unsafe {
         use windows::Win32::UI::Input::KeyboardAndMouse::{
-            GetAsyncKeyState, VK_LWIN, VK_MENU, VK_RWIN,
+            GetAsyncKeyState, VK_CONTROL, VK_LCONTROL, VK_LSHIFT, VK_LWIN, VK_MENU, VK_RCONTROL,
+            VK_RSHIFT, VK_RWIN, VK_SHIFT,
         };
 
         let mut release_inputs = Vec::new();
 
-        if (GetAsyncKeyState(VK_LWIN.0 as i32) as u16 & 0x8000) != 0 {
-            release_inputs.push(INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_LWIN,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        ..Default::default()
+        let keys_to_check = [
+            VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
+            VK_SHIFT, VK_LSHIFT, VK_RSHIFT,
+            VK_MENU, VK_LWIN, VK_RWIN,
+        ];
+
+        for &vk in &keys_to_check {
+            if (GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000) != 0 {
+                release_inputs.push(INPUT {
+                    r#type: INPUT_KEYBOARD,
+                    Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
+                        ki: KEYBDINPUT {
+                            wVk: vk,
+                            dwFlags: KEYEVENTF_KEYUP,
+                            ..Default::default()
+                        },
                     },
-                },
-            });
-        }
-        if (GetAsyncKeyState(VK_RWIN.0 as i32) as u16 & 0x8000) != 0 {
-            release_inputs.push(INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_RWIN,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        ..Default::default()
-                    },
-                },
-            });
-        }
-        if (GetAsyncKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0 {
-            release_inputs.push(INPUT {
-                r#type: INPUT_KEYBOARD,
-                Anonymous: windows::Win32::UI::Input::KeyboardAndMouse::INPUT_0 {
-                    ki: KEYBDINPUT {
-                        wVk: VK_MENU,
-                        dwFlags: KEYEVENTF_KEYUP,
-                        ..Default::default()
-                    },
-                },
-            });
+                });
+            }
         }
 
         if !release_inputs.is_empty() {
@@ -194,7 +236,6 @@ pub fn activate_last_tab(target_hwnd: HWND) {
             },
         ];
         SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
-        thread::sleep(Duration::from_millis(30));
 
         if target_thread_id != 0 && current_thread_id != target_thread_id {
             let _ = AttachThreadInput(current_thread_id, target_thread_id, BOOL(0));
