@@ -153,7 +153,9 @@ pub fn add_tray_icon(hwnd: HWND) -> bool {
 
         nid.hIcon = hicon;
 
-        let tip = "TabifyExplorer v0.3.2\0".encode_utf16().collect::<Vec<u16>>();
+        let version = env!("CARGO_PKG_VERSION");
+        let tip_str = format!("TabifyExplorer v{}\0", version);
+        let tip = tip_str.encode_utf16().collect::<Vec<u16>>();
         for (i, &c) in tip.iter().enumerate().take(127) {
             nid.szTip[i] = c;
         }
@@ -353,11 +355,18 @@ pub fn handle_menu_command(hwnd: HWND, wparam: WPARAM) {
             PostQuitMessage(0);
         },
         ID_TRAY_ABOUT => {
+            let version = env!("CARGO_PKG_VERSION");
+            let about_text = format!(
+                "TabifyExplorer v{} (Rust - Optimized)\n\nWindows 11 の新規エクスプローラーを既存ウィンドウのタブへ自動統合する常駐ツールです。\0",
+                version
+            );
+            let about_u16: Vec<u16> = about_text.encode_utf16().collect();
+            let title_u16: Vec<u16> = "バージョン情報\0".encode_utf16().collect();
             unsafe {
                 MessageBoxW(
                     hwnd,
-                    windows::core::w!("TabifyExplorer v0.1.0 (Rust - Optimized)\n\nWindows 11 の新規エクスプローラーを既存ウィンドウのタブへ自動統合する常駐ツールです。"),
-                    windows::core::w!("バージョン情報"),
+                    windows::core::PCWSTR(about_u16.as_ptr()),
+                    windows::core::PCWSTR(title_u16.as_ptr()),
                     MB_OK | MB_ICONINFORMATION,
                 );
             }
