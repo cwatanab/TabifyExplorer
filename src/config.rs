@@ -122,6 +122,7 @@ pub fn load_config() {
 
                 if content.contains("enable_log = true") {
                     ENABLE_LOG.store(true, Ordering::Relaxed);
+                    crate::logger::init_logger();
                 } else {
                     ENABLE_LOG.store(false, Ordering::Relaxed);
                     // ログが OFF の場合は不要なログファイルを削除

@@ -68,8 +68,9 @@ graph TD
 
 ### パス解析およびタブ生成の技術
 
-1. **0ms PEB 直接パース**：`NtQueryInformationProcess` を介してプロセスパラメータ（`RTL_USER_PROCESS_PARAMETERS`）の `CommandLine` を直接読み取ることで、エクスプローラー内部 UI の初期化を 1ms も待たずに 0.0001ms で目的パスを確定します。
-2. **UIA 直接 Invoke**：アクセシビリティ API `IUIAutomationInvokePattern` 経由で「新しいタブ」ボタン（`AddButton`）を直接 Invoke することで、フォーカス状態に関わらず 100% 確実に新タブを生成します。
+1. **0ms PEB 直接パース**：`NtQueryInformationProcess` を介してプロセスパラメータ（`RTL_USER_PROCESS_PARAMETERS`）の `CommandLine` を直接読み取ることで、エクスプローラー内部 UI の初期化を 1ms も待たずに 0.0001ms で目的パスを確定します。`/select,` などの起動オプションも安全に除去して正確なパスを抽出します。
+2. **ZIP / アーカイブパス対応**：実在フォルダに加えて `.zip` 等の圧縮フォルダパスを有効なナビゲートパスとして認識し、新規ウィンドウ起動初期の「ホーム」表示との誤判定を防止するため非同期ナビゲート完了までリトライ・取得処理を行います。
+3. **UIA 直接 Invoke**：アクセシビリティ API `IUIAutomationInvokePattern` 経由で「新しいタブ」ボタン（`AddButton`）を直接 Invoke することで、フォーカス状態に関わらず 100% 確実に新タブを生成します。
 
 ---
 

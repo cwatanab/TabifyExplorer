@@ -271,16 +271,23 @@ impl TabifyEngine {
 
         // 2. コマンドラインからパースできない場合は COM ポート経由で取得
         if target_folder_path.is_none() {
-            for _attempt in 1..=100 {
+            let mut last_home_path: Option<String> = None;
+            for _attempt in 1..=150 {
                 if let Some(p) = com_navigator::get_window_path(new_hwnd) {
                     if !p.is_empty() && path_resolver::is_navigable_folder(&p) {
-                        target_folder_path = Some(p.clone());
-                        if !path_resolver::is_home_path(&p) {
+                        if path_resolver::is_home_path(&p) {
+                            last_home_path = Some(p);
+                        } else {
+                            target_folder_path = Some(p);
                             break;
                         }
                     }
                 }
-                std::thread::sleep(Duration::from_millis(1));
+                std::thread::sleep(Duration::from_millis(2));
+            }
+
+            if target_folder_path.is_none() {
+                target_folder_path = last_home_path;
             }
         }
 

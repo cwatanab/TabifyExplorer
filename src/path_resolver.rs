@@ -74,9 +74,33 @@ pub fn is_navigable_folder(path: &str) -> bool {
         return true;
     }
 
+    let path_obj = Path::new(trimmed);
+
     // 実在するディレクトリかチェック
-    if Path::new(trimmed).is_dir() {
+    if path_obj.is_dir() {
         return true;
+    }
+
+    // 実在するファイルでエクスプローラーがフォルダとして開けるアーカイブ (zip等)、または拡張子が .zip/.cab/.lzh のパスかチェック
+    let lower_path = trimmed.to_lowercase();
+    if lower_path.ends_with(".zip")
+        || lower_path.ends_with(".cab")
+        || lower_path.ends_with(".lzh")
+        || lower_path.contains(".zip\\")
+        || lower_path.contains(".zip/")
+    {
+        return true;
+    }
+
+    if path_obj.is_file() {
+        if let Some(ext) = path_obj.extension().and_then(|e| e.to_str()) {
+            if ext.eq_ignore_ascii_case("zip")
+                || ext.eq_ignore_ascii_case("cab")
+                || ext.eq_ignore_ascii_case("lzh")
+            {
+                return true;
+            }
+        }
     }
 
     // shell: や ::{ で始まる仮想パス

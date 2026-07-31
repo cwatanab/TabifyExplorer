@@ -319,7 +319,12 @@ pub fn extract_folder_from_cmdline(cmd_line: &str) -> Option<String> {
     }
 
     for part in parts {
-        let trimmed = part.trim_matches('"').trim();
+        let mut trimmed = part.trim_matches('"').trim();
+        if let Some(stripped) = trimmed.strip_prefix("/select,") {
+            trimmed = stripped.trim_matches('"').trim();
+        } else if let Some(stripped) = trimmed.strip_prefix("/select") {
+            trimmed = stripped.trim_matches('"').trim();
+        }
         if !trimmed.is_empty()
             && crate::path_resolver::is_navigable_folder(trimmed)
             && !crate::path_resolver::is_home_path(trimmed)

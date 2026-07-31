@@ -1,6 +1,6 @@
 [package]
 name = "TabifyExplorer"
-version = "0.1.0"
+version = "0.3.6"
 edition = "2021"
 description = "Windows 11 Explorer Auto-Tabify Utility"
 
