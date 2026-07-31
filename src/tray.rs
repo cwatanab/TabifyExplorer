@@ -79,6 +79,7 @@ pub fn add_tray_icon(hwnd: HWND) -> bool {
         let mut hicon = HICON::default();
 
         // 1. Try LoadIconW from executable resource
+        #[allow(clippy::manual_dangling_ptr)]
         if let Ok(icon) = windows::Win32::UI::WindowsAndMessaging::LoadIconW(
             hinst,
             PCWSTR(1 as *const u16),
