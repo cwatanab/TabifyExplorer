@@ -6,6 +6,9 @@ use std::thread;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
 use windows::Win32::System::Threading::{
     CreateMutexW, OpenProcess, TerminateProcess, PROCESS_TERMINATE,
 };
@@ -23,15 +26,52 @@ fn ensure_single_instance() -> Option<HANDLE> {
     unsafe {
         kill_previous_instances_fast();
         std::thread::sleep(std::time::Duration::from_millis(100));
-        CreateMutexW(None, true, windows::core::w!("Global\\TabifyExplorer_SingleInstance")).ok()
+        CreateMutexW(
+            None,
+            true,
+            windows::core::w!("Global\\TabifyExplorer_SingleInstance"),
+        )
+        .ok()
+    }
+}
+
+fn process_entry_name(entry: &PROCESSENTRY32W) -> String {
+    String::from_utf16_lossy(
+        &entry.szExeFile[..entry
+            .szExeFile
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(entry.szExeFile.len())],
+    )
+}
+
+fn is_tabify_process_name(name: &str) -> bool {
+    let name_lower = name.to_lowercase();
+    name_lower.contains("tabify_explorer") || name_lower.contains("tabifyexplorer")
+}
+
+fn initialize_com_apartment() {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+    }
+}
+
+fn run_message_loop() {
+    unsafe {
+        let mut msg = MSG::default();
+        loop {
+            let res = GetMessageW(&mut msg, None, 0, 0);
+            if res.0 == 0 || res.0 == -1 {
+                info!("GetMessageW 終了メッセージ受領 (res={})", res.0);
+                break;
+            }
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
     }
 }
 
 fn kill_previous_instances_fast() {
-    use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-        TH32CS_SNAPPROCESS,
-    };
     let current_pid = std::process::id();
     unsafe {
         let snapshot = match CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
@@ -44,17 +84,8 @@ fn kill_previous_instances_fast() {
         };
         if Process32FirstW(snapshot, &mut entry).is_ok() {
             loop {
-                let name = String::from_utf16_lossy(
-                    &entry.szExeFile[..entry
-                        .szExeFile
-                        .iter()
-                        .position(|&c| c == 0)
-                        .unwrap_or(entry.szExeFile.len())],
-                );
-                let name_lower = name.to_lowercase();
-                if (name_lower.contains("tabify_explorer") || name_lower.contains("tabifyexplorer"))
-                    && entry.th32ProcessID != current_pid
-                {
+                let name = process_entry_name(&entry);
+                if is_tabify_process_name(&name) && entry.th32ProcessID != current_pid {
                     if let Ok(proc_handle) =
                         OpenProcess(PROCESS_TERMINATE, false, entry.th32ProcessID)
                     {
@@ -90,7 +121,8 @@ unsafe extern "system" fn tray_window_proc(
 
 fn create_tray_window() -> HWND {
     unsafe {
-        let hinstance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
+        let hinstance =
+            windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
         let hinstance_hinstance = windows::Win32::Foundation::HINSTANCE(hinstance.0);
         let class_name = windows::core::w!("TabifyTrayClass");
         let wc = WNDCLASSW {
@@ -102,7 +134,10 @@ fn create_tray_window() -> HWND {
         let atom = RegisterClassW(&wc);
         if atom == 0 {
             let err = windows::Win32::Foundation::GetLastError();
-            warn!("RegisterClassW が 0 を返しました (atom=0, GetLastError={:?})", err);
+            warn!(
+                "RegisterClassW が 0 を返しました (atom=0, GetLastError={:?})",
+                err
+            );
         } else {
             info!("RegisterClassW 成功 (atom={})", atom);
         }
@@ -159,8 +194,8 @@ fn main() {
 
     unsafe {
         let _ = windows::Win32::Media::timeBeginPeriod(1);
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
     }
+    initialize_com_apartment();
 
     let engine = Arc::new(TabifyEngine::new());
     engine.register_existing_windows();
@@ -170,9 +205,7 @@ fn main() {
 
     let engine_clone = Arc::clone(&engine);
     thread::spawn(move || {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        }
+        initialize_com_apartment();
         while let Ok(hwnd_val) = rx.recv() {
             engine_clone.process_window(hwnd_val);
         }
@@ -188,26 +221,17 @@ fn main() {
 
     let tray_hwnd = create_tray_window();
     if tray_hwnd.0 != 0 {
-        info!("tray_hwnd 有効 ({:?})。add_tray_icon を呼び出します。", tray_hwnd);
+        info!(
+            "tray_hwnd 有効 ({:?})。add_tray_icon を呼び出します。",
+            tray_hwnd
+        );
         tray::add_tray_icon(tray_hwnd);
     } else {
         error!("tray_hwnd が無効 (0) のため、add_tray_icon をスキップしました。");
     }
 
     info!("Entering main Win32 message loop.");
-
-    unsafe {
-        let mut msg = MSG::default();
-        loop {
-            let res = GetMessageW(&mut msg, None, 0, 0);
-            if res.0 == 0 || res.0 == -1 {
-                info!("GetMessageW 終了メッセージ受領 (res={})", res.0);
-                break;
-            }
-            let _ = TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-    }
+    run_message_loop();
 
     if tray_hwnd.0 != 0 {
         tray::remove_tray_icon(tray_hwnd);

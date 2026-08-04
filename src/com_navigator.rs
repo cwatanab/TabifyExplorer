@@ -39,6 +39,48 @@ pub fn get_root_hwnd(hwnd: HWND) -> HWND {
     }
 }
 
+fn matches_target_window(
+    browser_hwnd: HWND,
+    browser_root: HWND,
+    target_hwnd: HWND,
+    target_root: HWND,
+) -> bool {
+    browser_hwnd.0 == target_hwnd.0
+        || browser_root.0 == target_root.0
+        || browser_root.0 == target_hwnd.0
+        || browser_hwnd.0 == target_root.0
+}
+
+fn get_browser_path(browser: &IWebBrowser2) -> Option<String> {
+    unsafe {
+        if let Ok(doc_dispatch) = browser.Document() {
+            if let Ok(folder_view) = doc_dispatch.cast::<IShellFolderViewDual>() {
+                if let Ok(folder) = folder_view.Folder() {
+                    if let Ok(folder2) = folder.cast::<Folder2>() {
+                        if let Ok(folder_item) = folder2.Self_() {
+                            if let Ok(bstr_path) = folder_item.Path() {
+                                let path_str = bstr_path.to_string();
+                                if !path_str.is_empty() {
+                                    return Some(path_str);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let location_url = browser.LocationURL().ok().unwrap_or_default();
+        let location_str = location_url.to_string();
+
+        if !location_str.is_empty() {
+            return parse_location_url(&location_str);
+        }
+    }
+
+    None
+}
+
 /// 指定したエクスプローラーウィンドウ (target_hwnd) の IWebBrowser2 インスタンスを取得します。
 pub fn get_target_browser(target_hwnd: HWND) -> Option<IWebBrowser2> {
     if target_hwnd.0 == 0 {
@@ -76,11 +118,7 @@ pub fn get_target_browser(target_hwnd: HWND) -> Option<IWebBrowser2> {
 
             let browser_root = get_root_hwnd(HWND(hwnd_val.0));
 
-            if hwnd_val.0 == target_hwnd.0
-                || browser_root.0 == target_root.0
-                || browser_root.0 == target_hwnd.0
-                || hwnd_val.0 == target_root.0
-            {
+            if matches_target_window(HWND(hwnd_val.0), browser_root, target_hwnd, target_root) {
                 return Some(browser);
             }
         }
@@ -127,37 +165,9 @@ pub fn get_window_path(target_hwnd: HWND) -> Option<String> {
 
             let browser_root = get_root_hwnd(HWND(hwnd_val.0));
 
-            if hwnd_val.0 == target_hwnd.0
-                || browser_root.0 == target_root.0
-                || browser_root.0 == target_hwnd.0
-                || hwnd_val.0 == target_root.0
-            {
-                // 1. Document (IShellFolderViewDual) から実際のフォルダパスを取得 (最優先)
-                if let Ok(doc_dispatch) = browser.Document() {
-                    if let Ok(folder_view) = doc_dispatch.cast::<IShellFolderViewDual>() {
-                        if let Ok(folder) = folder_view.Folder() {
-                            if let Ok(folder2) = folder.cast::<Folder2>() {
-                                if let Ok(folder_item) = folder2.Self_() {
-                                    if let Ok(bstr_path) = folder_item.Path() {
-                                        let path_str = bstr_path.to_string();
-                                        if !path_str.is_empty() {
-                                            return Some(path_str);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 2. LocationURL からのパース取得
-                let location_url = browser.LocationURL().ok().unwrap_or_default();
-                let location_str = location_url.to_string();
-
-                if !location_str.is_empty() {
-                    if let Some(parsed) = parse_location_url(&location_str) {
-                        return Some(parsed);
-                    }
+            if matches_target_window(HWND(hwnd_val.0), browser_root, target_hwnd, target_root) {
+                if let Some(path) = get_browser_path(&browser) {
+                    return Some(path);
                 }
             }
         }
@@ -176,7 +186,9 @@ pub fn get_all_tabs(target_hwnd: HWND) -> Vec<TabInfo> {
 
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        if let Ok(shell_windows) = CoCreateInstance::<_, IShellWindows>(&ShellWindows, None, CLSCTX_ALL) {
+        if let Ok(shell_windows) =
+            CoCreateInstance::<_, IShellWindows>(&ShellWindows, None, CLSCTX_ALL)
+        {
             if let Ok(count) = shell_windows.Count() {
                 for i in 0..count {
                     let var = VARIANT::from(i);
@@ -197,43 +209,11 @@ pub fn get_all_tabs(target_hwnd: HWND) -> Vec<TabInfo> {
 
                     let browser_root = get_root_hwnd(hwnd_val);
 
-                    if hwnd_val.0 == target_hwnd.0
-                        || browser_root.0 == target_root.0
-                        || browser_root.0 == target_hwnd.0
-                        || hwnd_val.0 == target_root.0
-                    {
-                        let mut path_str = String::new();
-                        
-                        if let Ok(doc_dispatch) = browser.Document() {
-                            if let Ok(folder_view) = doc_dispatch.cast::<IShellFolderViewDual>() {
-                                if let Ok(folder) = folder_view.Folder() {
-                                    if let Ok(folder2) = folder.cast::<Folder2>() {
-                                        if let Ok(folder_item) = folder2.Self_() {
-                                            if let Ok(bstr_path) = folder_item.Path() {
-                                                let p = bstr_path.to_string();
-                                                if !p.is_empty() {
-                                                    path_str = p;
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                    if matches_target_window(hwnd_val, browser_root, target_hwnd, target_root) {
+                        let location_name =
+                            browser.LocationName().ok().unwrap_or_default().to_string();
 
-                        if path_str.is_empty() {
-                            let location_url = browser.LocationURL().ok().unwrap_or_default();
-                            let loc_str = location_url.to_string();
-                            if !loc_str.is_empty() {
-                                if let Some(parsed) = parse_location_url(&loc_str) {
-                                    path_str = parsed;
-                                }
-                            }
-                        }
-
-                        let location_name = browser.LocationName().ok().unwrap_or_default().to_string();
-
-                        if !path_str.is_empty() {
+                        if let Some(path_str) = get_browser_path(&browser) {
                             tabs.push(TabInfo {
                                 path: path_str,
                                 location_name,
@@ -252,11 +232,11 @@ pub fn get_all_tabs(target_hwnd: HWND) -> Vec<TabInfo> {
 /// COM を使用してエクスプローラーをフォルダへ遷移させます。
 pub fn navigate_via_com(browser: &IWebBrowser2, target_path: &str) -> Result<(), String> {
     use windows::core::BSTR;
-    
+
     let path_bstr = BSTR::from(target_path);
     let url = VARIANT::from(path_bstr);
     let empty = VARIANT::default();
-    
+
     unsafe {
         if let Err(e) = browser.Navigate2(
             &url as *const _,
@@ -265,14 +245,15 @@ pub fn navigate_via_com(browser: &IWebBrowser2, target_path: &str) -> Result<(),
             Some(&empty as *const _),
             Some(&empty as *const _),
         ) {
-            crate::warn!("browser.Navigate2 呼び出しに失敗しました: {} (パス: '{}')", e, target_path);
+            crate::warn!(
+                "browser.Navigate2 呼び出しに失敗しました: {} (パス: '{}')",
+                e,
+                target_path
+            );
             return Err(format!("Navigate2 failed: {}", e));
         }
     }
-    crate::info!(
-        "COM 経由でのフォルダ遷移を完了しました: '{}'",
-        target_path
-    );
+    crate::info!("COM 経由でのフォルダ遷移を完了しました: '{}'", target_path);
     Ok(())
 }
 
@@ -424,7 +405,8 @@ pub fn get_window_view_mode(target_hwnd: HWND) -> Option<u32> {
         return None;
     }
     unsafe {
-        let shell_windows: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_ALL).ok()?;
+        let shell_windows: IShellWindows =
+            CoCreateInstance(&ShellWindows, None, CLSCTX_ALL).ok()?;
         let count = shell_windows.Count().ok()?;
 
         for i in 0..count {

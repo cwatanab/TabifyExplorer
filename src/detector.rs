@@ -31,6 +31,23 @@ fn should_send_event(hwnd_val: isize) -> bool {
     true
 }
 
+fn notify_explorer_event(hwnd: HWND, source: &str) {
+    if hwnd.0 == 0
+        || !crate::window_controller::is_explorer_window(hwnd)
+        || !should_send_event(hwnd.0)
+    {
+        return;
+    }
+
+    crate::info!("{}: HWND {}", source, hwnd.0);
+
+    if let Ok(guard) = HOOK_SENDER.lock() {
+        if let Some(ref wrapper) = *guard {
+            let _ = wrapper.0.send(hwnd.0);
+        }
+    }
+}
+
 /// # Safety
 ///
 /// OS から WinEvent hook として呼び出されます。
@@ -43,18 +60,8 @@ pub unsafe extern "system" fn win_event_proc(
     _dw_event_thread: u32,
     _dwms_event_time: u32,
 ) {
-    if id_object == 0
-        && id_child == 0
-        && hwnd.0 != 0
-        && crate::window_controller::is_explorer_window(hwnd)
-        && should_send_event(hwnd.0)
-    {
-        crate::info!("WinEventHook エクスプローラーイベント検知: HWND {}", hwnd.0);
-        if let Ok(guard) = HOOK_SENDER.lock() {
-            if let Some(ref wrapper) = *guard {
-                let _ = wrapper.0.send(hwnd.0);
-            }
-        }
+    if id_object == 0 && id_child == 0 {
+        notify_explorer_event(hwnd, "WinEventHook エクスプローラーイベント検知");
     }
 }
 
@@ -73,20 +80,10 @@ unsafe extern "system" fn shell_hook_window_proc(
     if shell_msg != 0 && msg == shell_msg {
         let code = wparam.0 as u32;
         if code == HSHELL_WINDOWCREATED {
-            let target_hwnd = HWND(lparam.0);
-            if crate::window_controller::is_explorer_window(target_hwnd)
-                && should_send_event(target_hwnd.0)
-            {
-                crate::info!(
-                    "ShellHook エクスプローラーウィンドウ作成検知: HWND {}",
-                    target_hwnd.0
-                );
-                if let Ok(guard) = HOOK_SENDER.lock() {
-                    if let Some(ref wrapper) = *guard {
-                        let _ = wrapper.0.send(target_hwnd.0);
-                    }
-                }
-            }
+            notify_explorer_event(
+                HWND(lparam.0),
+                "ShellHook エクスプローラーウィンドウ作成検知",
+            );
         }
         LRESULT(0)
     } else {

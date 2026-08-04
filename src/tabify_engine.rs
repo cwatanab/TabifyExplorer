@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use windows::core::{Interface, VARIANT};
-use windows::Win32::Foundation::{BOOL, HWND, LPARAM};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, COINIT_APARTMENTTHREADED};
 use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, IsWindow};
 
@@ -137,6 +137,98 @@ impl TabifyEngine {
         }
     }
 
+    fn register_known_hwnd(&self, hwnd_val: isize) {
+        let mut known = self.known_explorer_hwnds.lock().unwrap();
+        known.insert(hwnd_val);
+    }
+
+    fn restore_window_and_register(&self, hwnd: HWND, original_rect: Option<RECT>) {
+        window_controller::restore_window(hwnd, original_rect);
+        self.register_known_hwnd(hwnd.0);
+    }
+
+    fn resolve_target_folder_path(new_hwnd: HWND) -> Option<String> {
+        const WINDOW_PATH_POLL_ATTEMPTS_WITH_CMDLINE: usize = 150;
+        const WINDOW_PATH_POLL_ATTEMPTS_WITHOUT_CMDLINE: usize = 500;
+
+        let mut cmdline_path: Option<String> = None;
+
+        if let Some(cmd_line) = crate::process_info::get_command_line_from_hwnd(new_hwnd) {
+            if let Some(path) = crate::process_info::extract_folder_from_cmdline(&cmd_line) {
+                info!("プロセス PEB コマンドラインから候補パスを抽出: '{}'", path);
+                cmdline_path = Some(path);
+            }
+        }
+
+        let poll_attempts = if cmdline_path.is_some() {
+            WINDOW_PATH_POLL_ATTEMPTS_WITH_CMDLINE
+        } else {
+            WINDOW_PATH_POLL_ATTEMPTS_WITHOUT_CMDLINE
+        };
+
+        let mut last_home_path: Option<String> = None;
+        for _attempt in 1..=poll_attempts {
+            if let Some(path) = com_navigator::get_window_path(new_hwnd) {
+                if !path.is_empty() && path_resolver::is_navigable_folder(&path) {
+                    if path_resolver::is_home_path(&path) {
+                        last_home_path = Some(path);
+                    } else {
+                        if let Some(candidate) = cmdline_path.as_deref() {
+                            if !path_resolver::are_paths_equivalent(candidate, &path) {
+                                info!(
+                                    "PEB 候補パス '{}' ではなく COM 取得パス '{}' を採用します",
+                                    candidate, path
+                                );
+                            }
+                        }
+
+                        return Some(path);
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        if let Some(path) = cmdline_path {
+            info!(
+                "COM から確定パスを取得できなかったため、PEB 候補パスを採用します: '{}'",
+                path
+            );
+            return Some(path);
+        }
+
+        last_home_path
+    }
+
+    fn find_new_tab_browser(
+        target_hwnd: HWND,
+        all_tabs: &[com_navigator::TabInfo],
+    ) -> Option<windows::Win32::UI::Shell::IWebBrowser2> {
+        let before_ptrs: HashSet<*mut std::ffi::c_void> =
+            all_tabs.iter().map(|tab| tab.browser.as_raw()).collect();
+
+        for _attempt in 0..50 {
+            let tabs_after = com_navigator::get_all_tabs(target_hwnd);
+
+            for tab_after in &tabs_after {
+                let ptr = tab_after.browser.as_raw();
+                if !before_ptrs.contains(&ptr) {
+                    return Some(tab_after.browser.clone());
+                }
+            }
+
+            if tabs_after.len() > all_tabs.len() {
+                if let Some(last_tab) = tabs_after.last() {
+                    return Some(last_tab.browser.clone());
+                }
+            }
+
+            std::thread::sleep(Duration::from_millis(2));
+        }
+
+        None
+    }
+
     pub fn process_window(&self, hwnd_val: isize) {
         {
             let known = self.known_explorer_hwnds.lock().unwrap();
@@ -163,7 +255,7 @@ impl TabifyEngine {
             processing.insert(hwnd_val);
         }
 
-        let processing_guard = ProcessingGuard {
+        let _processing_guard = ProcessingGuard {
             hwnds: Arc::clone(&self.processing_hwnds),
             hwnd_val,
         };
@@ -197,8 +289,7 @@ impl TabifyEngine {
                     "統合先の既存エクスプローラーが存在しないため、ベースウィンドウとして保持します (HWND: {})",
                     hwnd_val
                 );
-                let mut known = self.known_explorer_hwnds.lock().unwrap();
-                known.insert(hwnd_val);
+                self.register_known_hwnd(hwnd_val);
                 return;
             }
         };
@@ -212,10 +303,11 @@ impl TabifyEngine {
                 "ウィンドウ矩形の取得または非表示化に失敗しました: HWND {}",
                 hwnd_val
             );
-            let mut known = self.known_explorer_hwnds.lock().unwrap();
-            known.insert(hwnd_val);
+            self.register_known_hwnd(hwnd_val);
             return;
         }
+
+        let drag_bypass_threshold = Duration::from_millis(1200);
 
         // Shift キー押下によるバイパス判定
         if window_controller::is_shift_key_pressed() {
@@ -223,21 +315,17 @@ impl TabifyEngine {
                 "[バイパス] Shift キー検知のためタブ化をスキップして復元します (HWND: {})",
                 hwnd_val
             );
-            window_controller::restore_window(new_hwnd, original_rect);
-            let mut known = self.known_explorer_hwnds.lock().unwrap();
-            known.insert(hwnd_val);
+            self.restore_window_and_register(new_hwnd, original_rect);
             return;
         }
 
         // マウス左ボタン押下 (タブのドラッグ＆ドロップ操作中/直後) 判定
-        if window_controller::is_drag_and_drop_active_or_recent(Duration::from_millis(1200)) {
+        if window_controller::is_drag_and_drop_active_or_recent(drag_bypass_threshold) {
             info!(
                 "[バイパス] ドラッグ＆ドロップ操作中/直後 (カーソル移動を伴うD&D) 検知のためタブ化をスキップして復元します (HWND: {})",
                 hwnd_val
             );
-            window_controller::restore_window(new_hwnd, original_rect);
-            let mut known = self.known_explorer_hwnds.lock().unwrap();
-            known.insert(hwnd_val);
+            self.restore_window_and_register(new_hwnd, original_rect);
             return;
         }
 
@@ -245,48 +333,14 @@ impl TabifyEngine {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
 
-        // 新規ウィンドウが開こうとしている確定フォルダパスを取得 (1. プロセス PEB から 0ms 超即時抽出)
-        let mut target_folder_path: Option<String> = None;
-
-        if let Some(cmd_line) = crate::process_info::get_command_line_from_hwnd(new_hwnd) {
-            if let Some(p) = crate::process_info::extract_folder_from_cmdline(&cmd_line) {
-                info!("プロセス PEB コマンドラインから 0ms 即時パス抽出に成功: '{}'", p);
-                target_folder_path = Some(p);
-            }
-        }
-
-        // 2. コマンドラインからパースできない場合は COM ポート経由で取得
-        if target_folder_path.is_none() {
-            let mut last_home_path: Option<String> = None;
-            for _attempt in 1..=150 {
-                if let Some(p) = com_navigator::get_window_path(new_hwnd) {
-                    if !p.is_empty() && path_resolver::is_navigable_folder(&p) {
-                        if path_resolver::is_home_path(&p) {
-                            last_home_path = Some(p);
-                        } else {
-                            target_folder_path = Some(p);
-                            break;
-                        }
-                    }
-                }
-                std::thread::sleep(Duration::from_millis(2));
-            }
-
-            if target_folder_path.is_none() {
-                target_folder_path = last_home_path;
-            }
-        }
-
-        let folder_path = match target_folder_path {
+        let folder_path = match Self::resolve_target_folder_path(new_hwnd) {
             Some(p) => p,
             None => {
                 warn!(
                     "フォルダパスを取得できなかったため表示を復元します (HWND: {})",
                     hwnd_val
                 );
-                window_controller::restore_window(new_hwnd, original_rect);
-                let mut known = self.known_explorer_hwnds.lock().unwrap();
-                known.insert(hwnd_val);
+                self.restore_window_and_register(new_hwnd, original_rect);
                 return;
             }
         };
@@ -305,26 +359,20 @@ impl TabifyEngine {
 
         // 既存タブと同等のパスを持つウィンドウが検出された場合：
         // タブのドラッグアウト（切り離し）による新ウィンドウ生成であるため、新規ウィンドウを強制破棄せず独立復元・保持する
-        if let Some(_tab_name) = existing_tab_name {
+        if existing_tab_name.is_some()
+            && window_controller::is_drag_and_drop_active_or_recent(drag_bypass_threshold)
+        {
             info!(
                 "[バイパス] ドラッグアウト分離検知 (既存タブと同等パス: '{}') のため統合をスキップして復元します (HWND: {})",
                 folder_path, hwnd_val
             );
-            window_controller::restore_window(new_hwnd, original_rect);
-            let mut known = self.known_explorer_hwnds.lock().unwrap();
-            known.insert(hwnd_val);
-            drop(processing_guard);
+            self.restore_window_and_register(new_hwnd, original_rect);
             return;
         }
 
         if let Err(e) = uia_tab_creator::create_new_tab_via_uia(target_hwnd) {
-            error!(
-                "新規タブ作成エラー: {}. 表示復元 (HWND: {})",
-                e, hwnd_val
-            );
-            window_controller::restore_window(new_hwnd, original_rect);
-            let mut known = self.known_explorer_hwnds.lock().unwrap();
-            known.insert(hwnd_val);
+            error!("新規タブ作成エラー: {}. 表示復元 (HWND: {})", e, hwnd_val);
+            self.restore_window_and_register(new_hwnd, original_rect);
             return;
         }
 
@@ -337,42 +385,8 @@ impl TabifyEngine {
             None
         };
 
-        let before_ptrs: HashSet<*mut std::ffi::c_void> = all_tabs
-            .iter()
-            .map(|t| t.browser.as_raw())
-            .collect();
-
-        let mut target_browser: Option<windows::Win32::UI::Shell::IWebBrowser2> = None;
-
-        for _attempt in 0..50 {
-            let tabs_after = com_navigator::get_all_tabs(target_hwnd);
-            
-            // 1. 新しく増えた COM ポインタを持つタブを優先検索
-            for tab_after in &tabs_after {
-                let ptr = tab_after.browser.as_raw();
-                if !before_ptrs.contains(&ptr) {
-                    target_browser = Some(tab_after.browser.clone());
-                    break;
-                }
-            }
-
-            if target_browser.is_some() {
-                break;
-            }
-
-            // 2. ポインタに変化がない場合でもタブ数が増加していれば最後のタブを採用
-            if tabs_after.len() > all_tabs.len() {
-                if let Some(last_tab) = tabs_after.last() {
-                    target_browser = Some(last_tab.browser.clone());
-                    break;
-                }
-            }
-
-            std::thread::sleep(Duration::from_millis(2));
-        }
-
         let mut com_nav_success = false;
-        if let Some(browser) = target_browser {
+        if let Some(browser) = Self::find_new_tab_browser(target_hwnd, &all_tabs) {
             if com_navigator::navigate_via_com(&browser, &folder_path).is_ok() {
                 com_nav_success = true;
             }
@@ -385,16 +399,17 @@ impl TabifyEngine {
                     "アドレスバー遷移エラー: {}. 表示復元 (HWND: {})",
                     e, hwnd_val
                 );
-                window_controller::restore_window(new_hwnd, original_rect);
-                let mut known = self.known_explorer_hwnds.lock().unwrap();
-                known.insert(hwnd_val);
+                self.restore_window_and_register(new_hwnd, original_rect);
                 return;
             }
         }
 
         if let Some(vm) = parent_view_mode {
             com_navigator::apply_view_mode_to_window(target_hwnd, vm);
-            info!("親ウィンドウの表示形式 (ViewMode={}) を自動統一適用しました", vm);
+            info!(
+                "親ウィンドウの表示形式 (ViewMode={}) を自動統一適用しました",
+                vm
+            );
         }
 
         info!(
@@ -402,8 +417,6 @@ impl TabifyEngine {
             hwnd_val, folder_path, target_hwnd.0
         );
         window_controller::close_window(new_hwnd);
-
-        drop(processing_guard);
     }
 }
 
