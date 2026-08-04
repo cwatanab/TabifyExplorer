@@ -24,7 +24,7 @@ fn integrity_label_from_rid(rid: u32) -> &'static str {
         "untrusted"
     } else if rid < SECURITY_MANDATORY_MEDIUM_RID as u32 {
         "low"
-    } else if rid == SECURITY_MANDATORY_MEDIUM_PLUS_RID as u32 {
+    } else if rid == SECURITY_MANDATORY_MEDIUM_PLUS_RID {
         "medium+"
     } else if rid < SECURITY_MANDATORY_HIGH_RID as u32 {
         "medium"

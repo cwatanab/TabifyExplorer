@@ -93,7 +93,7 @@ pub fn get_uia_tab_items(target_hwnd: HWND) -> Vec<IUIAutomationElement> {
     unsafe {
         if let Ok(automation) = CoCreateInstance::<_, IUIAutomation>(&CUIAutomation, None, CLSCTX_INPROC_SERVER) {
             if let Ok(root) = automation.ElementFromHandle(target_hwnd) {
-                let var_type = VARIANT::from(UIA_TabItemControlTypeId.0 as i32);
+                let var_type = VARIANT::from(UIA_TabItemControlTypeId.0);
                 if let Ok(cond) = automation.CreatePropertyCondition(UIA_ControlTypePropertyId, &var_type) {
                     if let Ok(array) = root.FindAll(TreeScope_Subtree, &cond) {
                         if let Ok(len) = array.Length() {

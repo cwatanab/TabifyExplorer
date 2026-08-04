@@ -112,7 +112,7 @@ pub fn is_navigable_folder(path: &str) -> bool {
     }
 
     // shell: や ::{ で始まる仮想パス
-    if trimmed.get(..6).map_or(false, |s| s.eq_ignore_ascii_case("shell:")) || trimmed.starts_with("::{") {
+    if trimmed.get(..6).is_some_and(|s| s.eq_ignore_ascii_case("shell:")) || trimmed.starts_with("::{") {
         return true;
     }
 

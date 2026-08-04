@@ -1,4 +1,4 @@
-use windows::Win32::Foundation::{BOOL, COLORREF, HWND, LPARAM, RECT, WPARAM};
+use windows::Win32::Foundation::{BOOL, COLORREF, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
     DwmGetWindowAttribute, DwmSetWindowAttribute, DWMWA_CLOAK, DWMWA_CLOAKED,
     DWMWA_TRANSITIONS_FORCEDISABLED,
@@ -333,7 +333,74 @@ pub fn is_shift_key_pressed() -> bool {
     unsafe { (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0 }
 }
 
-/// マウス左ボタンが押下されているか最上位ビットで判定します。
+use std::time::{Duration, Instant};
+
+struct MouseDragState {
+    is_down: bool,
+    down_pos: POINT,
+    is_dragging: bool,
+    last_drag_time: Option<Instant>,
+}
+
+static MOUSE_DRAG_STATE: Mutex<MouseDragState> = Mutex::new(MouseDragState {
+    is_down: false,
+    down_pos: POINT { x: 0, y: 0 },
+    is_dragging: false,
+    last_drag_time: None,
+});
+
+/// マウスの状態を更新し、ドラッグ＆ドロップ（長距離のマウス移動を伴うクリック）操作を追跡します。
+pub fn update_mouse_drag_state() {
+    let is_down = unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 };
+    let mut current_pos = POINT { x: 0, y: 0 };
+    unsafe {
+        let _ = GetCursorPos(&mut current_pos);
+    }
+
+    if let Ok(mut state) = MOUSE_DRAG_STATE.lock() {
+        if is_down {
+            if !state.is_down {
+                state.is_down = true;
+                state.down_pos = current_pos;
+                state.is_dragging = false;
+            } else {
+                let dx = (current_pos.x - state.down_pos.x).abs();
+                let dy = (current_pos.y - state.down_pos.y).abs();
+                if dx > 15 || dy > 15 {
+                    state.is_dragging = true;
+                    state.last_drag_time = Some(Instant::now());
+                }
+            }
+        } else {
+            if state.is_down {
+                if state.is_dragging {
+                    state.last_drag_time = Some(Instant::now());
+                }
+                state.is_down = false;
+                state.is_dragging = false;
+            }
+        }
+    }
+}
+
+/// マウス左ボタンが押下されているか判定します。
 pub fn is_left_mouse_button_down() -> bool {
+    update_mouse_drag_state();
     unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 }
+}
+
+/// タブのドラッグ＆ドロップ操作中、またはドラッグ＆ドロップ直後（指定時間内）であるか判定します。
+pub fn is_drag_and_drop_active_or_recent(threshold: Duration) -> bool {
+    update_mouse_drag_state();
+    if let Ok(state) = MOUSE_DRAG_STATE.lock() {
+        if state.is_down && state.is_dragging {
+            return true;
+        }
+        if let Some(last_time) = state.last_drag_time {
+            if last_time.elapsed() < threshold {
+                return true;
+            }
+        }
+    }
+    false
 }

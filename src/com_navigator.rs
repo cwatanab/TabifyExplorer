@@ -76,15 +76,15 @@ pub fn get_target_browser(target_hwnd: HWND) -> Option<IWebBrowser2> {
 
             let browser_root = get_root_hwnd(HWND(hwnd_val.0));
 
-            if hwnd_val.0 as isize == target_hwnd.0
-                || browser_root.0 as isize == target_root.0
-                || browser_root.0 as isize == target_hwnd.0
-                || hwnd_val.0 as isize == target_root.0
+            if hwnd_val.0 == target_hwnd.0
+                || browser_root.0 == target_root.0
+                || browser_root.0 == target_hwnd.0
+                || hwnd_val.0 == target_root.0
             {
                 return Some(browser);
             }
         }
-        crate::warn!(
+        crate::info!(
             "target_hwnd ({}) または target_root ({}) に一致する ShellWindow が見つかりませんでした (Count={})",
             target_hwnd.0,
             target_root.0,
@@ -127,10 +127,10 @@ pub fn get_window_path(target_hwnd: HWND) -> Option<String> {
 
             let browser_root = get_root_hwnd(HWND(hwnd_val.0));
 
-            if hwnd_val.0 as isize == target_hwnd.0
-                || browser_root.0 as isize == target_root.0
-                || browser_root.0 as isize == target_hwnd.0
-                || hwnd_val.0 as isize == target_root.0
+            if hwnd_val.0 == target_hwnd.0
+                || browser_root.0 == target_root.0
+                || browser_root.0 == target_hwnd.0
+                || hwnd_val.0 == target_root.0
             {
                 // 1. Document (IShellFolderViewDual) から実際のフォルダパスを取得 (最優先)
                 if let Ok(doc_dispatch) = browser.Document() {
@@ -191,16 +191,16 @@ pub fn get_all_tabs(target_hwnd: HWND) -> Vec<TabInfo> {
                     };
 
                     let hwnd_val = match browser.HWND() {
-                        Ok(h) => HWND(h.0 as isize),
+                        Ok(h) => HWND(h.0),
                         Err(_) => continue,
                     };
 
                     let browser_root = get_root_hwnd(hwnd_val);
 
-                    if hwnd_val.0 as isize == target_hwnd.0
-                        || browser_root.0 as isize == target_root.0
-                        || browser_root.0 as isize == target_hwnd.0
-                        || hwnd_val.0 as isize == target_root.0
+                    if hwnd_val.0 == target_hwnd.0
+                        || browser_root.0 == target_root.0
+                        || browser_root.0 == target_hwnd.0
+                        || hwnd_val.0 == target_root.0
                     {
                         let mut path_str = String::new();
                         
@@ -439,7 +439,7 @@ pub fn get_window_view_mode(target_hwnd: HWND) -> Option<u32> {
             };
 
             let hwnd_val = match web_browser.HWND() {
-                Ok(h) => h.0 as isize,
+                Ok(h) => h.0,
                 Err(_) => continue,
             };
 
@@ -484,7 +484,7 @@ pub fn apply_view_mode_to_window(target_hwnd: HWND, view_mode: u32) {
             };
 
             let hwnd_val = match web_browser.HWND() {
-                Ok(h) => h.0 as isize,
+                Ok(h) => h.0,
                 Err(_) => continue,
             };
 

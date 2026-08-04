@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 pub mod com_navigator;
 pub mod config;
 pub mod detector;

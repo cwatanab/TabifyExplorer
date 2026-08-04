@@ -63,8 +63,10 @@ impl TabifyEngine {
             let mut tick = 0u32;
             loop {
                 std::thread::sleep(Duration::from_millis(150));
+                window_controller::update_mouse_drag_state();
+
                 tick += 1;
-                if tick % 50 == 0 {
+                if tick.is_multiple_of(50) {
                     self.cleanup_dead_hwnds();
                 }
 
@@ -89,10 +91,8 @@ impl TabifyEngine {
                                                 let root =
                                                     com_navigator::get_root_hwnd(HWND(hwnd_val.0));
                                                 let is_visible = window_controller::is_normal_visible_explorer_window(root, None);
-                                                if is_visible {
-                                                    if !hwnds.contains(&(root.0 as isize)) {
-                                                        hwnds.push(root.0 as isize);
-                                                    }
+                                                if is_visible && !hwnds.contains(&root.0) {
+                                                    hwnds.push(root.0);
                                                 }
                                             }
                                         }
@@ -229,30 +229,16 @@ impl TabifyEngine {
             return;
         }
 
-        // マウス左ボタン長押し (ドラッグ＆ドロップ) 判定
-        if window_controller::is_left_mouse_button_down() {
-            let mut released = false;
-            let check_interval = Duration::from_millis(10);
-            let max_checks = 15;
-
-            for _ in 0..max_checks {
-                std::thread::sleep(check_interval);
-                if !window_controller::is_left_mouse_button_down() {
-                    released = true;
-                    break;
-                }
-            }
-
-            if !released {
-                info!(
-                    "[バイパス] ドラッグ＆ドロップ長押し検知のためスキップして復元します (HWND: {})",
-                    hwnd_val
-                );
-                window_controller::restore_window(new_hwnd, original_rect);
-                let mut known = self.known_explorer_hwnds.lock().unwrap();
-                known.insert(hwnd_val);
-                return;
-            }
+        // マウス左ボタン押下 (タブのドラッグ＆ドロップ操作中/直後) 判定
+        if window_controller::is_drag_and_drop_active_or_recent(Duration::from_millis(1200)) {
+            info!(
+                "[バイパス] ドラッグ＆ドロップ操作中/直後 (カーソル移動を伴うD&D) 検知のためタブ化をスキップして復元します (HWND: {})",
+                hwnd_val
+            );
+            window_controller::restore_window(new_hwnd, original_rect);
+            let mut known = self.known_explorer_hwnds.lock().unwrap();
+            known.insert(hwnd_val);
+            return;
         }
 
         unsafe {
@@ -310,32 +296,23 @@ impl TabifyEngine {
         // 既存タブが存在するか確認
         let all_tabs = com_navigator::get_all_tabs(target_hwnd);
         let mut existing_tab_name = None;
-        let mut existing_tab_hwnd = None;
         for tab in &all_tabs {
             if path_resolver::are_paths_equivalent(&tab.path, &folder_path) {
                 existing_tab_name = Some(tab.location_name.clone());
-                existing_tab_hwnd = Some(tab.hwnd);
                 break;
             }
         }
 
-        if let Some(tab_name) = existing_tab_name {
-            info!("既存タブが存在します。新規タブを作成せず、既存タブ '{}' をアクティブ化します。", tab_name);
-            let _ = uia_tab_creator::activate_tab_by_name(target_hwnd, &tab_name);
-            
-            if let Some(hwnd) = existing_tab_hwnd {
-                unsafe {
-                    let _ = windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(hwnd);
-                    let _ = windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow(hwnd);
-                }
-            }
-
+        // 既存タブと同等のパスを持つウィンドウが検出された場合：
+        // タブのドラッグアウト（切り離し）による新ウィンドウ生成であるため、新規ウィンドウを強制破棄せず独立復元・保持する
+        if let Some(_tab_name) = existing_tab_name {
             info!(
-                "既存タブ統合完了: HWND {} ('{}') -> HWND {}",
-                hwnd_val, folder_path, target_hwnd.0
+                "[バイパス] ドラッグアウト分離検知 (既存タブと同等パス: '{}') のため統合をスキップして復元します (HWND: {})",
+                folder_path, hwnd_val
             );
-            window_controller::close_window(new_hwnd);
-            
+            window_controller::restore_window(new_hwnd, original_rect);
+            let mut known = self.known_explorer_hwnds.lock().unwrap();
+            known.insert(hwnd_val);
             drop(processing_guard);
             return;
         }
